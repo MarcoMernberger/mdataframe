@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+'''
+Created on Aug 28, 2015
+
+@author: mernberger
+'''
 from pkg_resources import get_distribution, DistributionNotFound
 
 try:
@@ -9,3 +14,7 @@ except DistributionNotFound:
     __version__ = 'unknown'
 finally:
     del get_distribution, DistributionNotFound
+
+
+from .clustering import *
+#from .pca import PCA, MyPCA, SklearnPCA, MlabPCA, MDS, LDA, TSNE
