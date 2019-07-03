@@ -3,14 +3,12 @@ clustering
 ==========
 
 
-Add a short description here!
-
+A convenience package to wrap some standard machine learning approaches and plots.
 
 Description
 ===========
 
-A longer description of your project goes here...
-
+A convenience package to wrap some standard machine learning approaches and plots.
 
 Note
 ====
