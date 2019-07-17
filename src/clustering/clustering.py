@@ -4,7 +4,8 @@ Created on Aug 28, 2015
 @author: mernberger
 """
 import matplotlib
-matplotlib.use("cairo")
+
+matplotlib.use("agg")
 import pypipegraph as ppg
 import mbf_genomics
 import copy
@@ -24,8 +25,10 @@ import math
 import matplotlib.gridspec as grid
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pathlib import Path
-from  .plots import generate_heatmap_figure 
+from .plots import generate_heatmap_figure, generate_heatmap_simple_figure
 import functools
+import collections
+
 
 class Imputer:
     def __init__(self, name, missing_value):
@@ -36,7 +39,10 @@ class Imputer:
         return data
 
     def get_dependencies(self):
-        return ppg.ParameterInvariant(f"{self.name}_PI", [self.name, self.missing_value])
+        return (
+            []
+        )  # ppg.ParameterInvariant(f"{self.name}", [self.name, self.missing_value])
+
 
 class ImputeFixed(Imputer):
     def __init__(self, missing_value=np.NaN, replacement_value=0):
@@ -50,6 +56,7 @@ class ImputeFixed(Imputer):
     def transform(self, df):
         df = df.replace(self.missing_value, self.replacement_value)
         return df
+
 
 class ImputeMeanMedian(Imputer):
     def __init__(self, missing_value=np.NaN, axis=0, strategy="mean"):
@@ -68,6 +75,7 @@ class ImputeMeanMedian(Imputer):
 
     def transform(self, matrix):
         return self.imputer.fit_transform(matrix)
+
 
 class ClusterAnnotator(mbf_genomics.annotator.Annotator):
     def __init__(self, clustering):
@@ -110,6 +118,7 @@ class Scaler:
     def get_dependencies(self):
         return ppg.ParameterInvariant(f"{self.name}_PI", [self.name])
 
+
 class TransformScaler(Scaler):
     def __init__(self, name, transformation_function):
         Scaler.__init__(self, name)
@@ -123,7 +132,10 @@ class TransformScaler(Scaler):
         return self.transformation_function(data)
 
     def get_dependencies(self):
-        return [ppg.ParameterInvariant(f"{self.name}_PI", [self.name]), ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function)]
+        return [
+            ppg.ParameterInvariant(f"{self.name}_PI", [self.name]),
+            ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function),
+        ]
 
 
 class ZScaler(Scaler):
@@ -144,8 +156,11 @@ class ZScaler(Scaler):
     def get_dependencies(self):
         deps = [ppg.ParameterInvariant(f"{self.name}_PI", [self.name])]
         if self.transformation_function is not None:
-            deps.append(ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function))
+            deps.append(
+                ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function)
+            )
         return deps
+
 
 class ML(object):
     def __init__(
@@ -158,14 +173,12 @@ class ML(object):
         dependencies=[],
         annotators=[],
         predecessor=None,
-        **kwargs
+        **kwargs,
     ):
         """
         This is a wrapper class for a machine learning approach, that takes a dataframe or a
         genomic region alternatively and does some ML with it.
         @genes_or_df_or_loading_function Dataframe or GenomicRegion containing 2-dimensional data
-        @columns Dataframe columns that contain the actual data, may be None then all columns are used
-        @columns Dataframe rows that contain the actual data, may be None, then all rows are used
         @dependencies dependencies
         @annotators annotators to be added to the genomics.genes.Genes object, if given.
         
@@ -180,17 +193,17 @@ class ML(object):
         self.dependencies = dependencies
         self.annotators = annotators
         self.cache_dir = Path("cache") / "ML" / self.name
-        self.cache_dir.mkdir(parents = True, exist_ok = True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.predecessor = predecessor
         if self.predecessor is not None:
             self.result_dir = self.predecessor.result_dir.parent / self.name
         elif hasattr(genes_or_df_or_loading_function, "result_dir"):
             self.result_dir = genes_or_df_or_loading_function.result_dir / self.name
-            if 'row_labels' not in kwargs:
-                kwargs['row_labels'] = 'name'
+            if "row_labels" not in kwargs:
+                kwargs["row_labels"] = "name"
         else:
             self.result_dir = Path("results") / self.name
-        self.result_dir.parent.mkdir(parents = True, exist_ok = True)
+        self.result_dir.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(
             self.df_or_gene_or_loading_function, mbf_genomics.regions.GenomicRegions
         ):
@@ -208,7 +221,16 @@ class ML(object):
                 )
             )
         elif isinstance(self.df_or_gene_or_loading_function, pd.DataFrame):
-            self.dependencies.append(ppg.ParameterInvariant(self.name+'_df_or_gene_or_loading_function', [self.df_or_gene_or_loading_function.columns, self.df_or_gene_or_loading_function.as_matrix(), self.df_or_gene_or_loading_function.index]))
+            self.dependencies.append(
+                ppg.ParameterInvariant(
+                    self.name + "_df_or_gene_or_loading_function",
+                    [
+                        self.df_or_gene_or_loading_function.columns,
+                        self.df_or_gene_or_loading_function.as_matrix(),
+                        self.df_or_gene_or_loading_function.index,
+                    ],
+                )
+            )
         self.dependencies.append(
             ppg.ParameterInvariant(self.name + "_columns", self.columns)
         )
@@ -275,6 +297,7 @@ class ML(object):
         def __load(dictionary_with_attributes):
             for attr_name in dictionary_with_attributes:
                 setattr(self, attr_name, dictionary_with_attributes[attr_name])
+
         return (
             ppg.CachedDataLoadingJob(
                 os.path.join(self.cache_dir, self.name + "_load"), __calc, __load
@@ -283,26 +306,32 @@ class ML(object):
             .depends_on(ppg.FunctionInvariant(self.name + "_load_calc", __calc))
         )
 
-    def set_labels(self, row_labels = None, column_labels = None):
+    def set_labels(self, row_labels=None, column_labels=None):
         self.row_f = row_labels
         self.col_f = column_labels
+
         def verify_label_arguments(row_labels, col_labels):
             def decorator_label_nice(func):
                 @functools.wraps(func)
                 def wrapper(*args, **kwargs):
-                    print(self.name)
                     if row_labels is not None:
                         if isinstance(row_labels, str):
                             if row_labels not in self.df_full.columns:
-                                raise ValueError(f"Column given by row_labels = {row_labels} not in {self.df_full.columns}.")
+                                raise ValueError(
+                                    f"Column given by row_labels = {row_labels} not in {self.df_full.columns}."
+                                )
                     if col_labels is not None:
                         if isinstance(col_labels, str):
                             if col_labels not in self.df.index.values:
-                                raise ValueError(f"Row index given by column_labels={col_labels} not in {self.df.index}.") 
+                                raise ValueError(
+                                    f"Row index given by column_labels={col_labels} not in {self.df.index}."
+                                )
                     return func(*args, **kwargs)
+
                 return wrapper
+
             return decorator_label_nice
-        
+
         def modify_df(modifier_func):
             def decorator_func(func):
                 @functools.wraps(func)
@@ -310,7 +339,9 @@ class ML(object):
                     df = func(*args, **kwargs)
                     df = modifier_func(df)
                     return df
+
                 return wrapper
+
             return decorator_func
 
         @verify_label_arguments(row_labels=self.row_f, col_labels=self.col_f)
@@ -319,40 +350,62 @@ class ML(object):
 
         if self.row_f is not None:
             if isinstance(self.row_f, str):
+
                 def replace_index_column(df):
-                    df.index = self.df_full[self.row_f].values
+                    new_index = self.df_full[self.row_f].values
+                    seen = collections.Counter()
+                    for i in range(len(new_index)):
+                        if new_index[i] in seen:
+                            new_index[i] = f"{new_index[i]}_({seen[new_index[i]]})"
+                        seen[new_index[i]] += 1
+                    df.index = new_index
                     return df
-                modfunc = replace_index_column 
+
+                modfunc = replace_index_column
             elif isinstance(self.row_f, dict):
-                def replace_index_values(df, repl_dict = self.row_f):
-                    df.index = [repl_dict[rname] if rname in repl_dict else rname for rname in self.df.index.values]
+
+                def replace_index_values(df, repl_dict=self.row_f):
+                    df.index = [
+                        repl_dict[rname] if rname in repl_dict else rname
+                        for rname in self.df.index.values
+                    ]
                     return df
+
                 modfunc = replace_index_values
             elif callable(self.row_f):
                 modfunc = self.row_f
             else:
-                raise ValueError(f"Don\'t know what to do with that row_f {self.row_f}.")
+                raise ValueError(f"Don't know what to do with that row_f {self.row_f}.")
             __get_nice_df = modify_df(modfunc)(__get_nice_df)
-        
+
         if self.col_f is not None:
             if isinstance(self.col_f, str):
+
                 def replace_index(df):
-                    df.columns = self.df.loc[self.col_f].values                    
+                    df.columns = self.df.loc[self.col_f].values
                     return df
+
                 modfunc = replace_index  # this is pretty useless
             elif isinstance(self.col_f, dict):
-                def replace_index_values(df, repl_dict = self.col_f):
-                    df.columns = [repl_dict[rname] if rname in repl_dict else rname for rname in df.columns.values] 
+
+                def replace_index_values(df, repl_dict=self.col_f):
+                    df.columns = [
+                        repl_dict[rname] if rname in repl_dict else rname
+                        for rname in df.columns.values
+                    ]
                     return df
+
                 modfunc = replace_index_values
             elif callable(self.col_f):
                 modfunc = self.col_f
             else:
-                raise ValueError(f"Don\'t know what to do with that column_f {self.col_f}.")
+                raise ValueError(
+                    f"Don't know what to do with that column_f {self.col_f}."
+                )
             __get_nice_df = modify_df(modfunc)(__get_nice_df)
         self.__labels_nice = __get_nice_df
-        
-    def sort(self, *sorting_transformations, axis=1):
+
+    def sort(self, *sorting_transformations, axis=0):
         """
         We want to be able to sort by row or column
         to supply a function that can be applied on the dataframe
@@ -365,13 +418,22 @@ class ML(object):
         by = None
         ax = axis
         ac = True
+        deps = []
         for sorting in sorting_transformations:
             if callable(sorting):
                 sorts.append(sorting)
+                transformation_name = sorting.__name__.replace('>', '').replace('<', '')
+                deps.append(
+                    ppg.FunctionInvariant(
+                        new_name + "_{}".format(transformation_name), sorting
+                    )
+                )
+                new_name = f"{new_name}_sort({transformation_name})" 
             elif isinstance(sorting, str):
                 # row name or column name
                 if by is not None:
                     sorts.append(["sort_values", by, ax, ac])
+                    new_name = f"{new_name}_sort({by}_{ax}_{ac})"
                     ax = axis
                     ac = True
                 by = sorting
@@ -385,7 +447,7 @@ class ML(object):
                 if all([isinstance(x, str) for x in sorting]):
                     if by is not None:
                         sorts.append(["sort_values", by, ax, ac])
-                    by = list
+                        new_name = f"{new_name}_sort({by}_{ax}_{ac})"
                 elif all([isinstance(x, bool) for x in sorting]):
                     ac = sorting
                     if len(by) != len(ac):
@@ -398,23 +460,24 @@ class ML(object):
                 raise ValueError("Don't know how to sort by this: {}.".format(sorting))
         if by is not None:
             sorts.append(["sort_values", by, ax, ac])
-        self.transform(*sorts)
+            new_name = f"{new_name}_sort({by}_{ax}_{ac})"
+        deps.extend(self.get_dependencies() + [self.load()])
 
         def __scale():
             df_scaled = self.df
-            for ttype, transformation in transforms:
-                print(transformation)
-                if ttype == 0:
-                    df_scaled = df_scaled.apply(transformation, axis)
-                if ttype == 1:
-                    func = getattr(df_scaled, transformation)
-                    df_scaled = func()
-                if ttype == 2:
-                    func = getattr(df_scaled, transformation[0])
-                    df_scaled = func(*transformation[1], **transformation[2])
-                print(df_scaled)
             df_full = self.df_full.copy()
-            df_full.update(df_scaled)
+            for x in df_full.columns:
+                print(x)
+            for sorting, by, ax, ac in sorts:
+                print(sorting, by, ax, ac)
+                df_full = df_full.sort_values(by=by, axis=ax, ascending=ac)
+                if ax == 0:
+                    new_index = df_full.index
+                    df_scaled = df_scaled.loc[new_index]
+                else:
+                    new_index = df_full.columns
+                    df_scaled = df_scaled[new_index]
+
             return {
                 "df": df_scaled,
                 "rows": df_scaled.index.values,
@@ -422,7 +485,7 @@ class ML(object):
                 "df_full": df_full,
             }
 
-        deps.append(ppg.FunctionInvariant(new_name + "_func", __scale))
+        deps.append(ppg.FunctionInvariant(new_name + "_sort", __scale))
         return ML(
             new_name,
             __scale,
@@ -431,7 +494,7 @@ class ML(object):
             self.index_column,
             deps,
             self.annotators,
-            self
+            self,
         )
 
     def transform(self, *transformations, axis=1):
@@ -471,7 +534,7 @@ class ML(object):
                     )
             elif isinstance(transformation, list):
                 if hasattr(pd.DataFrame, transformation[0]):
-                    transformation_name = transformation
+                    transformation_name = transformation[0]
                     positional = []
                     keyargs = {}
                     for item in transformation[1:]:
@@ -532,6 +595,7 @@ class ML(object):
                 "columns": df_scaled.columns.values,
                 "df_full": df_full,
             }
+
         deps.append(ppg.FunctionInvariant(new_name + "_func", __scale))
         return ML(
             new_name,
@@ -541,13 +605,15 @@ class ML(object):
             self.index_column,
             deps,
             self.annotators,
-            self
+            self,
         )
 
     def impute(self, *transformations, axis=1):
- 
+
         if len(transformations) == 0:
-            return self.transform(ImputeFixed(missing_value=np.NaN, replacement_value=0))
+            return self.transform(
+                ImputeFixed(missing_value=np.NaN, replacement_value=0)
+            )
 
         return self.transform(*transformations, axis=1)
 
@@ -612,27 +678,65 @@ class ML(object):
             self.index_column,
             deps,
             self.annotators,
-            self
+            self,
         )
 
-    def write(self, index = False, row_nice = False, column_nice = False):
-        outfile = os.path.join(self.result_dir, self.name + ".tsv")
+    def write(self, index=False, row_nice=False, column_nice=False):
+        outfile = self.result_dir / (self.name + ".tsv")
+        self.result_dir.mkdir(parents=True, exist_ok=True)
 
         def __write():
-            self.df_full.to_csv(outfile, sep="\t", index=True)
+            self.df_full.to_csv(str(outfile), sep="\t", index=True)
 
         return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
     def write_df(self):
-        outfile = os.path.join(self.result_dir, self.name + "_data.tsv")
+        outfile = self.result_dir / (self.name + "_data.tsv")
+        self.result_dir.mkdir(parents=True, exist_ok=True)
 
         def __write():
-            self.df.to_csv(outfile, sep="\t", index=True)
+            self.df.to_csv(str(outfile), sep="\t", index=True)
 
         return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
+    def plot_simple(
+        self,
+        outfile=None,
+        show_column_label=True,
+        title=None,
+        dependencies=[],
+        **params,
+    ):
+        dependencies.append(self.load())
+        if outfile is None:
+            outfile = Path(self.result_dir) / f"{self.name}_simple_hm.png"
+        elif isinstance(outfile, str):
+            outfile = Path(outfile)
+        outfile.parent.mkdir(parents=True, exist_ok=True)
 
+        def __plot():
+            df = self.__labels_nice()
+            figure = generate_heatmap_simple_figure(
+                df, title, show_column_label=show_column_label, **params
+            )
+            figure.savefig(outfile)
 
+        row_s = self.row_f
+        col_s = self.col_f
+        if callable(row_s):
+            row_s = row_s.__name__
+        if callable(col_s):
+            col_s = col_s.__name__
+
+        params_job = ppg.ParameterInvariant(
+            outfile.name + "_label_nice", list(params) + [title, show_column_label]
+        )
+
+        return (
+            ppg.FileGeneratingJob(outfile, __plot)
+            .depends_on(dependencies)
+            .depends_on(params_job)
+        )
 
     def plot_singlepage(
         self,
@@ -644,14 +748,14 @@ class ML(object):
         show_column_label=True,
         show_row_label=True,
         dependencies=[],
-        **params
+        **params,
     ):
         dependencies.append(self.load())
         if outfile is None:
-            outfile = Path(self.result_dir) /f"{self.name}_hm.png"
+            outfile = Path(self.result_dir) / f"{self.name}_hm.png"
         elif isinstance(outfile, str):
             outfile = Path(outfile)
-        outfile.parent.mkdir(parents = True, exist_ok = True)
+        outfile.parent.mkdir(parents=True, exist_ok=True)
 
         def __plot():
             df = self.__labels_nice()
@@ -663,28 +767,40 @@ class ML(object):
                 legend_location=legend_location,
                 show_column_label=show_column_label,
                 show_row_label=show_row_label,
-                **params
+                **params,
             )
             #    max_inches_to_plot = 60000 / (2*dpi)
             #    if inches_top+inches_bottom >= max_inches_to_plot:
             #    raise ValueError("The figure you are trying to plot is too large.")
             figure.savefig(outfile)
+
         row_s = self.row_f
         col_s = self.col_f
         if callable(row_s):
             row_s = row_s.__name__
         if callable(col_s):
             col_s = col_s.__name__
-        
-        params_job = ppg.ParameterInvariant(self.name + "_label_nice", list(params) + [title,
-        display_linkage_column,
-        display_linkage_row,
-        legend_location,
-        show_column_label,
-        show_row_label,
-        row_s, col_s])
 
-        return ppg.FileGeneratingJob(outfile, __plot).depends_on(dependencies).depends_on(params_job)
+        params_job = ppg.ParameterInvariant(
+            outfile.name + "_label_nice",
+            list(params)
+            + [
+                title,
+                display_linkage_column,
+                display_linkage_row,
+                legend_location,
+                show_column_label,
+                show_row_label,
+                row_s,
+                col_s,
+            ],
+        )
+
+        return (
+            ppg.FileGeneratingJob(outfile, __plot)
+            .depends_on(dependencies)
+            .depends_on(params_job)
+        )
 
     def plot_multipage(
         self,
@@ -696,13 +812,16 @@ class ML(object):
         show_column_label=True,
         show_row_label=True,
         dependencies=[],
-        **params
+        **params,
     ):
         # figure out if we need to separate the plot
         dependencies.append(self.load())
         outf = outfile
         if outfile is None:
-            outf = os.path.join(self.result_dir, "{}_hmmp.png".format(self.name))
+            outf = Path(self.result_dir) / f"{self.name}_hmmp.png"
+        elif isinstance(outf, str):
+            outf = Path(outf)
+        outf.parent.mkdir(parents=True, exist_ok=True)
 
         def __plot():
             dpi = params.get("dpi", 300)
@@ -713,10 +832,12 @@ class ML(object):
 
             max_rows_per_page = max_inches_to_plot * rows_per_inch
             split_indices = np.arange(0, len(df), max_rows_per_page)
-            pdf = PdfPages()
-            for index in enumerate(split_indices):
-                df_sub = df.loc[index : min(index + max_rows_per_page, len_y)]
-                fig = self.__generate_heatmap_figure(
+            pdf = PdfPages(outf)
+            for index in split_indices:
+                fro = df.index[index]
+                to = df.index[min(index + max_rows_per_page, len_y - 1)]
+                df_sub = df.loc[fro:to]
+                fig = generate_heatmap_figure(
                     df_sub,
                     title,
                     display_linkage_column=display_linkage_column,
@@ -724,27 +845,36 @@ class ML(object):
                     legend_location=legend_location,
                     show_column_label=show_column_label,
                     show_row_label=show_row_label,
-                    **params
+                    **params,
                 )
                 pdf.savefig(fig)
             pdf.close()
+
         row_s = self.row_f
         col_s = self.col_f
         if callable(row_s):
             row_s = row_s.__name__
         if callable(col_s):
             col_s = col_s.__name__
-        params_job = ppg.ParameterInvariant(self.name + "_label_nice", list(params) + [title,
-        display_linkage_column,
-        display_linkage_row,
-        legend_location,
-        show_column_label,
-        show_row_label,
-        row_s, col_s])
-
-        return ppg.FileGeneratingJob(outfile, __plot).depends_on(dependencies).depends_on(params_job)
-
-        return ppg.FileGeneratingJob(outf, __plot).depends_on(dependencies)
+        params_job = ppg.ParameterInvariant(
+            outf.name + "_label_nice",
+            list(params)
+            + [
+                title,
+                display_linkage_column,
+                display_linkage_row,
+                legend_location,
+                show_column_label,
+                show_row_label,
+                row_s,
+                col_s,
+            ],
+        )
+        return (
+            ppg.FileGeneratingJob(outf, __plot)
+            .depends_on(dependencies)
+            .depends_on(params_job)
+        )
 
     def get_custom_metric(self, axis=0):
         if axis == 0:
@@ -767,7 +897,7 @@ class ML(object):
 
         return calc_distance_matrix
 
-    
+
 class ClusteringMethod:
     def __init__(self, name):
         """

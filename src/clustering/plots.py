@@ -379,3 +379,40 @@ def generate_heatmap_figure(
         plt.suptitle(title, fontsize=fontsize_title)
     plt.close()
     return f
+
+
+def generate_heatmap_simple_figure(
+    df,
+    title=None,
+    show_column_label=True,
+    **params
+):
+    """
+    Plots a heatmap. No fancy shit.
+    @df dataframe with values to plot. Plots the whole df, labels are df.columns no index.
+    @show_column_label plot column labels
+    """
+    fontsize_title = params.get("fontsize_title", 12)
+    fontsize_columns = params.get("fontsize_column", 12)
+    dpi = params.get("dpi", 300)
+    fig_x = params.get("fig_x", 8)
+    fig_y = params.get("fig_x", 16)
+    f = plt.figure(
+        figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
+    )
+    colormap = params.get("colormap", "seismic")
+    vmax = params.get("vmax", df.max().max())
+    vmin = params.get("vmin", df.min().min())
+    norm = matplotlib.colors.Normalize(vmin, vmax)
+    im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect="auto")
+    plt.colorbar(im)
+    # add the labels
+    if show_column_label:
+        plt.gca().set_xticks(range(len(df.columns)))
+        plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
+    # set the title
+    if title is not None:
+        plt.title(title, fontsize=fontsize_title)
+    plt.tight_layout()
+    plt.close()
+    return f
