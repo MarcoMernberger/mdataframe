@@ -29,53 +29,13 @@ from .plots import generate_heatmap_figure, generate_heatmap_simple_figure
 import functools
 import collections
 
-
-class Imputer:
-    def __init__(self, name, missing_value):
-        self.name = name
-        self.missing_value = missing_value
-
-    def transform(self, data):
-        return data
-
-    def get_dependencies(self):
-        return (
-            []
-        )  # ppg.ParameterInvariant(f"{self.name}", [self.name, self.missing_value])
-
-
-class ImputeFixed(Imputer):
-    def __init__(self, missing_value=np.NaN, replacement_value=0):
-        """
-        replaces missing values with  with zeros
-        """
-        self.replacement_value = replacement_value
-        name = f"Im({missing_value}{replacement_value})"
-        Imputer.__init__(self, name, missing_value)
-
-    def transform(self, df):
-        df = df.replace(self.missing_value, self.replacement_value)
-        return df
-
-
-class ImputeMeanMedian(Imputer):
-    def __init__(self, missing_value=np.NaN, axis=0, strategy="mean"):
-        name = f"Im({missing_value}{axis}{strategy})"
-        if not strategy in ["mean", "median", "most_frequent"]:
-            raise ValueError(
-                "Wrong strategy, allowed is mean, median and most_frequent, was {}.".format(
-                    strategy
-                )
-            )
-        Imputer.__init__(self, name, missing_value)
-        self.strategy = strategy
-        self.imputer = sklearn.preprocessing.Imputer(
-            missing_values=self.missing_value, strategy=self.strategy, axis=axis
-        )
-
-    def transform(self, matrix):
-        return self.imputer.fit_transform(matrix)
-
+def equality_of_function(func1, func2):
+    eq_bytecode = func1.__code__.co_code == func1.__code__.co_code
+    eq_closure = func1.__closure__ == func1.__closure__
+    eq_constants = func1.__code__.co_consts == func1.__code__.co_consts
+    eq_conames = func1.__code__.co_names == func1.__code__.co_names
+    eq_varnames = func1.__code__.co_varnames == func1.__code__.co_varnames
+    return eq_bytecode & eq_closure & eq_conames & eq_constants & eq_varnames
 
 class ClusterAnnotator(mbf_genomics.annotator.Annotator):
     def __init__(self, clustering):
@@ -107,21 +67,56 @@ class ClusterAnnotator(mbf_genomics.annotator.Annotator):
                 }
             )
 
+class Transformer:
 
-class Scaler:
-    def __init__(self, name="Identity"):
+    def __init__(self, name):
         self.name = name
+        self.invariants = [self.name]
+        
+    def transform(self):
+        raise NotImplementedError()
 
-    def transform(self, data):
-        return data
+    def get_invariant_parameters(self):
+        return self.invariants
+    
+class ImputeFixed(Transformer):
+    def __init__(self, missing_value=np.NaN, replacement_value=0):
+        """
+        replaces missing values with  with zeros
+        """
+        name = f"Im({missing_value}{replacement_value})"
+        super().__init__(name)
+        self.invariants.extend([missing_value, replacement_value])
+        self.missing_value = missing_value
+        self.replacement_value = replacement_value
 
-    def get_dependencies(self):
-        return ppg.ParameterInvariant(f"{self.name}_PI", [self.name])
+    def transform(self, df):
+        df = df.replace(self.missing_value, self.replacement_value)
+        return df
 
+class ImputeMeanMedian(Transformer):
+    def __init__(self, missing_value=np.NaN, axis=0, strategy="mean"):
+        name = f"Im({missing_value}{axis}{strategy})"
+        if not strategy in ["mean", "median", "most_frequent"]:
+            raise ValueError(
+                "Wrong strategy, allowed is mean, median and most_frequent, was {}.".format(
+                    strategy
+                )
+            )
+        super().__init__(name)
+        self.missing_value = missing_value
+        self.strategy = strategy
+        self.invariants.extend([strategy, missing_value, axis])
+        self.imputer = sklearn.preprocessing.Imputer(
+            missing_values=self.missing_value, strategy=self.strategy, axis=axis
+        )
 
-class TransformScaler(Scaler):
+    def transform(self, matrix):
+        return self.imputer.fit_transform(matrix)
+
+class TransformScaler(Transformer):
     def __init__(self, name, transformation_function):
-        Scaler.__init__(self, name)
+        super().__init__(name)
         if not hasattr(transformation_function, "__call__"):
             raise ValueError(
                 "Transformation function was not a callable for {}.".format(self.name)
@@ -131,36 +126,25 @@ class TransformScaler(Scaler):
     def transform(self, data):
         return self.transformation_function(data)
 
-    def get_dependencies(self):
-        return [
-            ppg.ParameterInvariant(f"{self.name}_PI", [self.name]),
-            ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function),
-        ]
+#put me in the dependencies in transform
+#    def get_dependencies(self):
+#        return [
+#            ppg.ParameterInvariant(f"{self.name}_PI", [self.name]),
+#            ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function),
+#        ]
 
-
-class ZScaler(Scaler):
+class ZScaler(Transformer):
     def __init__(self, name="Z", transformation=None):
+        super().__init__(name)
         self.transformation_function = transformation
-        Scaler.__init__(self, name)
-
+        
     def transform(self, df):
         if df.max() == df.min():
             return pd.Series(0, index=df.index, dtype=df.dtype)
         if self.transformation_function is not None:
             df = df.transform(self.transformation_function)
         ret = ((df.transpose() - df.mean()) / df.std(ddof=1)).transpose()
-        # matrix = df.asÄ_matrix()
-        # ret = (matrix.T - np.mean(matrix, axis = 1))/np.std(matrix, axis = 1, ddof = 1)).T
         return ret
-
-    def get_dependencies(self):
-        deps = [ppg.ParameterInvariant(f"{self.name}_PI", [self.name])]
-        if self.transformation_function is not None:
-            deps.append(
-                ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function)
-            )
-        return deps
-
 
 class ML(object):
     def __init__(
@@ -407,11 +391,16 @@ class ML(object):
 
     def sort(self, *sorting_transformations, axis=0):
         """
-        We want to be able to sort by row or column
+        We want to be able to sort by row or column --> need by, axis and ascending
         to supply a function that can be applied on the dataframe
-        to apply mulitple sortings in order given
+        to apply mulitple sortings in order given --> 
         sort(column1, axis1, ascending1, column2, column3) --> this will apply the sortings separately after one another
         sort([column1, column2], [ascending1, ascending2], axis) --> this will apply the sorting simultaneously
+        each string is a column/row to sort "by"
+        each int is an "axis" referring to the previous "by"
+        optionally bool is an "ascending" for the previous "by"
+        multiple lists can be lists of columns/rows, optionally followed by int and bool lists and are applied simultanouesly, so you get a prioritized ordering 
+        multiple lists can also contain [by, axis, ascending] and are applied consecutively.
         """
         new_name = self.name
         sorts = []
@@ -421,16 +410,11 @@ class ML(object):
         deps = []
         for sorting in sorting_transformations:
             if callable(sorting):
+                #supply a sorting function that takes a dataframe
                 sorts.append(sorting)
-                transformation_name = sorting.__name__.replace('>', '').replace('<', '')
-                deps.append(
-                    ppg.FunctionInvariant(
-                        new_name + "_{}".format(transformation_name), sorting
-                    )
-                )
-                new_name = f"{new_name}_sort({transformation_name})" 
+                new_name = f"{new_name}_sort({sorting.__name__.replace('>', '').replace('<', '')})" 
             elif isinstance(sorting, str):
-                # row name or column name
+                # row name or column name to sort by
                 if by is not None:
                     sorts.append(["sort_values", by, ax, ac])
                     new_name = f"{new_name}_sort({by}_{ax}_{ac})"
@@ -448,19 +432,56 @@ class ML(object):
                     if by is not None:
                         sorts.append(["sort_values", by, ax, ac])
                         new_name = f"{new_name}_sort({by}_{ax}_{ac})"
+                        ax = axis
+                        ac = True
+                    by = sorting
                 elif all([isinstance(x, bool) for x in sorting]):
                     ac = sorting
                     if len(by) != len(ac):
                         raise ValueError(
-                            "If you supply a list of columns/row to sort by, you must supply the same number of ascending parameters. Offending was {}.".format(
+                            "If you supply a list of columns/row to sort by, you must supply the same number of ascending parameters or a single ascending value. Offending was {}.".format(
                                 ac
                             )
                         )
+                elif all([isinstance(x, int) for x in sorting]):
+                    ax = sorting
+                    if len(by) != len(ax):
+                        raise ValueError(
+                            "If you supply a list of columns/row to sort by, you must supply the same number of axis parameters or a single axis. Offending was {}.".format(
+                                ac
+                            )
+                        )
+                elif len(sorting) <= 3:
+                    by = None
+                    for parameter in sorting:
+                        if isinstance(parameter, str):
+                            by = parameter
+                        if isinstance(parameter, bool):
+                            ac = parameter
+                        if isinstance(parameter, int):
+                            assert parameter in [0, 1]
+                            ax = parameter
+                    sorts.append(["sort_values", by, ax, ac])
+                    new_name = f"{new_name}_sort({by}_{ax}_{ac})"
             else:
                 raise ValueError("Don't know how to sort by this: {}.".format(sorting))
         if by is not None:
             sorts.append(["sort_values", by, ax, ac])
             new_name = f"{new_name}_sort({by}_{ax}_{ac})"
+
+        for sort in sorts:        
+            if callable(sort):
+                deps.append(
+                    ppg.FunctionInvariant(
+                        f"{new_name}_{sort.__name__.replace('>', '').replace('<', '')}", sort
+                    )
+                )
+            elif isinstance(sort, list):
+                deps.append(
+                    ppg.ParameterInvariant(
+                        f"{new_name}_PI{str(sort[1])}", sort[1:]
+                    )
+                )
         deps.extend(self.get_dependencies() + [self.load()])
 
         def __scale():
@@ -510,7 +531,7 @@ class ML(object):
                 transforms.append((0, transformation))
                 deps.append(
                     ppg.FunctionInvariant(
-                        new_name + "_{}".format(transformation_name), transformation
+                        new_name + "_FI{}".format(transformation_name), transformation
                     )
                 )
             elif (
@@ -518,14 +539,21 @@ class ML(object):
                 and hasattr(transformation, "transform")
                 and callable(transformation.transform)
             ):
-                if hasattr(transformation, "get_dependencies"):
-                    deps.extend(transformation.get_dependencies())
+                
                 transforms.append((0, transformation.transform))
                 transformation_name = transformation.name
+                deps.append(
+                    ppg.FunctionInvariant(
+                        new_name + "_{}".format(transformation_name), transformation.transform
+                    )
+                )                
+                if hasattr(transformation, "get_invariant_parameters"):
+                    deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{transformation.name}", transformation.get_invariant_parameters()))
             elif isinstance(transformation, str):
                 if hasattr(pd.DataFrame, transformation):
                     transforms.append((1, transformation))
                     transformation_name = transformation
+                    deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{transformation}", [transformation]))
                 else:
                     raise ValueError(
                         "Don't know how to apply this transformation: {}.".format(
@@ -545,6 +573,9 @@ class ML(object):
                         else:
                             positional.append(item)
                     transforms.append((2, [transformation[0], positional, keyargs]))
+                    deps.append(
+                        ppg.ParameterInvariant(f"{new_name}_PI_{transformation[0]}", transformation)
+                    )
                 else:
                     raise ValueError(
                         "First parameter in list must be the name of a pandas function to apply. Don't know how to apply this transformation: {}.".format(
@@ -567,6 +598,7 @@ class ML(object):
                 func = transformation["func"]
                 del transformation["func"]
                 transforms.append((2, [func, [], transformation]))
+                deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{func}", list(transformation)))
             else:
                 raise ValueError(
                     "{} did not have a name or callable transformation function named 'transform' and is not a valid method on pandas.DataFrame.".format(
@@ -875,28 +907,6 @@ class ML(object):
             .depends_on(dependencies)
             .depends_on(params_job)
         )
-
-    def get_custom_metric(self, axis=0):
-        if axis == 0:
-            metric = self.metric
-        else:
-            metric = self.metric_columns
-
-        def calc_distance_matrix(data):
-            """
-            With a given metric, generate a distance matrix from the scaled matrix.
-            """
-            distance = np.ones([data.shape[0], data.shape[0]])
-            for ii, vec1 in enumerate(data):
-                for jj, vec2 in enumerate(data):
-                    if jj < ii:
-                        continue
-                    distance[ii, jj] = metric(vec1, vec2)
-                    distance[jj, ii] = distance[ii, jj]
-            return distance
-
-        return calc_distance_matrix
-
 
 class ClusteringMethod:
     def __init__(self, name):
