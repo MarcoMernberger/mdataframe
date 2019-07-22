@@ -29,6 +29,7 @@ from .plots import generate_heatmap_figure, generate_heatmap_simple_figure
 import functools
 import collections
 
+
 def equality_of_function(func1, func2):
     eq_bytecode = func1.__code__.co_code == func1.__code__.co_code
     eq_closure = func1.__closure__ == func1.__closure__
@@ -36,6 +37,7 @@ def equality_of_function(func1, func2):
     eq_conames = func1.__code__.co_names == func1.__code__.co_names
     eq_varnames = func1.__code__.co_varnames == func1.__code__.co_varnames
     return eq_bytecode & eq_closure & eq_conames & eq_constants & eq_varnames
+
 
 class ClusterAnnotator(mbf_genomics.annotator.Annotator):
     def __init__(self, clustering):
@@ -67,18 +69,19 @@ class ClusterAnnotator(mbf_genomics.annotator.Annotator):
                 }
             )
 
-class Transformer:
 
+class Transformer:
     def __init__(self, name):
         self.name = name
         self.invariants = [self.name]
-        
+
     def transform(self):
         raise NotImplementedError()
 
     def get_invariant_parameters(self):
         return self.invariants
-    
+
+
 class ImputeFixed(Transformer):
     def __init__(self, missing_value=np.NaN, replacement_value=0):
         """
@@ -86,13 +89,14 @@ class ImputeFixed(Transformer):
         """
         name = f"Im({missing_value}{replacement_value})"
         super().__init__(name)
-        self.invariants.extend([missing_value, replacement_value])
+        self.invariants.extend([str(missing_value), replacement_value])
         self.missing_value = missing_value
         self.replacement_value = replacement_value
 
     def transform(self, df):
         df = df.replace(self.missing_value, self.replacement_value)
         return df
+
 
 class ImputeMeanMedian(Transformer):
     def __init__(self, missing_value=np.NaN, axis=0, strategy="mean"):
@@ -114,6 +118,7 @@ class ImputeMeanMedian(Transformer):
     def transform(self, matrix):
         return self.imputer.fit_transform(matrix)
 
+
 class TransformScaler(Transformer):
     def __init__(self, name, transformation_function):
         super().__init__(name)
@@ -126,18 +131,20 @@ class TransformScaler(Transformer):
     def transform(self, data):
         return self.transformation_function(data)
 
-#put me in the dependencies in transform
+
+# put me in the dependencies in transform
 #    def get_dependencies(self):
 #        return [
 #            ppg.ParameterInvariant(f"{self.name}_PI", [self.name]),
 #            ppg.FunctionInvariant(f"{self.name}_PI", self.transformation_function),
 #        ]
 
+
 class ZScaler(Transformer):
     def __init__(self, name="Z", transformation=None):
         super().__init__(name)
         self.transformation_function = transformation
-        
+
     def transform(self, df):
         if df.max() == df.min():
             return pd.Series(0, index=df.index, dtype=df.dtype)
@@ -145,6 +152,7 @@ class ZScaler(Transformer):
             df = df.transform(self.transformation_function)
         ret = ((df.transpose() - df.mean()) / df.std(ddof=1)).transpose()
         return ret
+
 
 class ML(object):
     def __init__(
@@ -410,9 +418,9 @@ class ML(object):
         deps = []
         for sorting in sorting_transformations:
             if callable(sorting):
-                #supply a sorting function that takes a dataframe
+                # supply a sorting function that takes a dataframe
                 sorts.append(sorting)
-                new_name = f"{new_name}_sort({sorting.__name__.replace('>', '').replace('<', '')})" 
+                new_name = f"{new_name}_sort({sorting.__name__.replace('>', '').replace('<', '')})"
             elif isinstance(sorting, str):
                 # row name or column name to sort by
                 if by is not None:
@@ -469,28 +477,24 @@ class ML(object):
             sorts.append(["sort_values", by, ax, ac])
             new_name = f"{new_name}_sort({by}_{ax}_{ac})"
 
-        for sort in sorts:        
+        for sort in sorts:
             if callable(sort):
                 deps.append(
                     ppg.FunctionInvariant(
-                        f"{new_name}_{sort.__name__.replace('>', '').replace('<', '')}", sort
+                        f"{new_name}_{sort.__name__.replace('>', '').replace('<', '')}",
+                        sort,
                     )
                 )
             elif isinstance(sort, list):
                 deps.append(
-                    ppg.ParameterInvariant(
-                        f"{new_name}_PI{str(sort[1])}", sort[1:]
-                    )
+                    ppg.ParameterInvariant(f"{new_name}_PI{str(sort[1])}", sort[1:])
                 )
         deps.extend(self.get_dependencies() + [self.load()])
 
         def __scale():
             df_scaled = self.df
             df_full = self.df_full.copy()
-            for x in df_full.columns:
-                print(x)
             for sorting, by, ax, ac in sorts:
-                print(sorting, by, ax, ac)
                 df_full = df_full.sort_values(by=by, axis=ax, ascending=ac)
                 if ax == 0:
                     new_index = df_full.index
@@ -539,21 +543,31 @@ class ML(object):
                 and hasattr(transformation, "transform")
                 and callable(transformation.transform)
             ):
-                
+
                 transforms.append((0, transformation.transform))
                 transformation_name = transformation.name
                 deps.append(
                     ppg.FunctionInvariant(
-                        new_name + "_{}".format(transformation_name), transformation.transform
+                        new_name + "_{}".format(transformation_name),
+                        transformation.transform,
                     )
-                )                
+                )
                 if hasattr(transformation, "get_invariant_parameters"):
-                    deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{transformation.name}", transformation.get_invariant_parameters()))
+                    deps.append(
+                        ppg.ParameterInvariant(
+                            f"{new_name}_PI_{transformation.name}",
+                            transformation.get_invariant_parameters(),
+                        )
+                    )
             elif isinstance(transformation, str):
                 if hasattr(pd.DataFrame, transformation):
                     transforms.append((1, transformation))
                     transformation_name = transformation
-                    deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{transformation}", [transformation]))
+                    deps.append(
+                        ppg.ParameterInvariant(
+                            f"{new_name}_PI_{transformation}", [transformation]
+                        )
+                    )
                 else:
                     raise ValueError(
                         "Don't know how to apply this transformation: {}.".format(
@@ -574,7 +588,9 @@ class ML(object):
                             positional.append(item)
                     transforms.append((2, [transformation[0], positional, keyargs]))
                     deps.append(
-                        ppg.ParameterInvariant(f"{new_name}_PI_{transformation[0]}", transformation)
+                        ppg.ParameterInvariant(
+                            f"{new_name}_PI_{transformation[0]}", transformation
+                        )
                     )
                 else:
                     raise ValueError(
@@ -598,7 +614,11 @@ class ML(object):
                 func = transformation["func"]
                 del transformation["func"]
                 transforms.append((2, [func, [], transformation]))
-                deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{func}", list(transformation)))
+                deps.append(
+                    ppg.ParameterInvariant(
+                        f"{new_name}_PI_{func}", list(transformation)
+                    )
+                )
             else:
                 raise ValueError(
                     "{} did not have a name or callable transformation function named 'transform' and is not a valid method on pandas.DataFrame.".format(
@@ -606,13 +626,30 @@ class ML(object):
                     )
                 )
             new_name = f"{new_name}_{transformation_name}"
-        deps.extend(self.get_dependencies() + [self.load()])
+        deps.extend(
+            self.get_dependencies()
+            + [self.load()]
+            + [ppg.ParameterInvariant(f"{new_name}_PI_axis", [axis])]
+        )
 
         def __scale():
             df_scaled = self.df
             for ttype, transformation in transforms:
                 if ttype == 0:
-                    df_scaled = df_scaled.apply(transformation, axis)
+                    if axis == 0:
+                        df_scaled = df_scaled.apply(transformation, axis=0)
+                    else:
+                        print(str(transformation))
+                        if not ("ImputeFixed" in str(transformation)):
+                            print(df_scaled)
+                            print("----------------", transformation)
+                            df_scaled = (
+                                df_scaled.transpose()
+                                .apply(transformation, axis=0)
+                                .transpose()
+                            )
+                            print(df_scaled)
+                            # raise ValueError()
                 if ttype == 1:
                     func = getattr(df_scaled, transformation)
                     df_scaled = func()
@@ -651,8 +688,8 @@ class ML(object):
 
     def scale(self, *transformations, axis=1):
         if len(transformations) == 0:
-            return self.transform(sklearn.preprocessing.scale)
-        return self.transform(*transformations, axis=1)
+            return self.transform(sklearn.preprocessing.scale, axis=axis)
+        return self.transform(*transformations, axis=axis)
 
     def get_dependencies(self):
         return self.dependencies
@@ -665,14 +702,13 @@ class ML(object):
         if clustering_strategy is None:
             strategy = NewKMeans("KNN", 2)
         new_name = "{}_Cl({})_axis_{}".format(self.name, strategy.name, axis)
-        deps = (
-            self.dependencies
-            + [
-                self.load(),
-                ppg.ParameterInvariant(new_name + "_params", [axis, fit_parameter]),
-            ]
-            + strategy.get_dependencies()
-        )
+        deps = self.dependencies + [
+            self.load(),
+            ppg.ParameterInvariant(
+                new_name + "_params", [axis, fit_parameter] + strategy.invariants
+            ),
+            ppg.FunctionInvariant(new_name + "_func", strategy.fit),
+        ]
 
         def __do_cluster():
             if not isinstance(strategy, ClusteringMethod):
@@ -701,7 +737,7 @@ class ML(object):
                 "rows": df.index.values,
             }
 
-        deps.append(ppg.FunctionInvariant(new_name + "_func", __do_cluster))
+        deps.append(ppg.FunctionInvariant(new_name + "_do_Cluster", __do_cluster))
         return ML(
             new_name,
             __do_cluster,
@@ -752,6 +788,7 @@ class ML(object):
                 df, title, show_column_label=show_column_label, **params
             )
             figure.savefig(outfile)
+            df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         row_s = self.row_f
         col_s = self.col_f
@@ -805,6 +842,7 @@ class ML(object):
             #    if inches_top+inches_bottom >= max_inches_to_plot:
             #    raise ValueError("The figure you are trying to plot is too large.")
             figure.savefig(outfile)
+            df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         row_s = self.row_f
         col_s = self.col_f
@@ -850,7 +888,7 @@ class ML(object):
         dependencies.append(self.load())
         outf = outfile
         if outfile is None:
-            outf = Path(self.result_dir) / f"{self.name}_hmmp.png"
+            outf = Path(self.result_dir) / f"{self.name}_hmmp.pdf"
         elif isinstance(outf, str):
             outf = Path(outf)
         outf.parent.mkdir(parents=True, exist_ok=True)
@@ -881,6 +919,7 @@ class ML(object):
                 )
                 pdf.savefig(fig)
             pdf.close()
+            df.to_csv(str(outf) + ".tsv", index=False, sep="\t")
 
         row_s = self.row_f
         col_s = self.col_f
@@ -908,24 +947,23 @@ class ML(object):
             .depends_on(params_job)
         )
 
+
 class ClusteringMethod:
-    def __init__(self, name):
+    def __init__(self, name, invariants):
         """
         This is a wrapper for any clustering approach. 
         @param name of the clustering strategy
         """
-        self.name = name
+        self.__name = name
+        self.__invariants = invariants
 
-    def get_dependencies(self):
-        pass
+    @property
+    def invariants(self):
+        return self.__invariants
 
-    def transform(self, df):
-        df_imputed = df.transform(self.imputer.transform)
-        df_imputed = df_imputed[
-            df_imputed.max(axis=1) > 0
-        ]  # can't have features with only zeros in the matrix
-        df_scaled = df_imputed.transform(self.scaler.transform)
-        return df_scaled
+    @property
+    def name(self):
+        return self.__name
 
     def fit(self, df, **fit_parameter):
         self.model = self.clustering.fit(df, fit_parameter)
@@ -933,13 +971,11 @@ class ClusteringMethod:
         index = df.index.values
         self.clusters = pd.DataFrame({self.name: cluster_ids}, index=index)
 
-    def predict(self, df_other, sample_weights):
-        if sample_weights == None:
-            sample_weights = self.sample_weights
-        df_imputed_other = df_other.transform(self.imputer.transform)
+    def predict(self, df_other, imputer, scaler, **fit_parameter):
+        df_imputed_other = df_other.transform(imputer.transform)
         df_imputed_other = df_imputed_other[df_imputed_other.max(axis=1) > 0]
-        df_scaled_other = df_imputed_other.transform(self.scaler.transform)
-        return self.model.predict(df_scaled_other.values, sample_weights)
+        df_scaled_other = df_imputed_other.transform(scaler.transform)
+        return self.model.predict(df_scaled_other.values, **fit_parameter)
 
 
 class NewKMeans(ClusteringMethod):
@@ -960,43 +996,55 @@ class NewKMeans(ClusteringMethod):
         @param init 'k-means++', 'random' or ndarray of centroids
         @param max_iter max iterations til convergence
         """
-        self.name = name
-        self.no_of_clusters = no_of_clusters
-        self.n_init = n_init
-        self.max_iter = max_iter
-        self.random_state = random_state
-        self.n_jobs = n_jobs
-        self.init = init
-        ClusteringMethod.__init__(self, name)
-        self.clustering = sklearn.cluster.KMeans(
-            n_clusters=self.no_of_clusters,
+        self.__no_of_clusters = no_of_clusters
+        self.__n_init = n_init
+        self.__max_iter = max_iter
+        self.__random_state = random_state
+        self.__n_jobs = n_jobs
+        self.__init = init
+        invariants = [
+            self.__no_of_clusters,
+            self.__init,
+            self.__n_jobs,
+            self.__random_state,
+            self.__max_iter,
+            self.__n_init,
+        ]
+        super().__init__(name, invariants)
+        self.__clustering = sklearn.cluster.KMeans(
+            n_clusters=self.__no_of_clusters,
             init="k-means++",
-            n_init=self.n_init,
-            max_iter=self.max_iter,
+            n_init=self.__n_init,
+            max_iter=self.__max_iter,
             algorithm="auto",
             tol=0.0001,
             precompute_distances="auto",
             verbose=0,
-            random_state=self.random_state,
+            random_state=self.__random_state,
             copy_x=True,
-            n_jobs=self.n_jobs,
+            n_jobs=self.__n_jobs,
         )
 
-    def get_dependencies(self):
-        return [
-            ppg.ParameterInvariant(
-                self.name + "parameters",
-                [
-                    self.n_init,
-                    self.max_iter,
-                    self.no_of_clusters,
-                    self.random_state,
-                    self.n_init,
-                    self.n_jobs,
-                ],
-            ),
-            ppg.FunctionInvariant(self.name + "_fit", self.fit),
-        ]
+    @property
+    def clustering(self):
+        return self.__clustering
+
+
+#    def get_dependencies(self):
+#        return [
+#            ppg.ParameterInvariant(
+#                self.name + "parameters",
+#               [
+#                   self.n_init,
+#                   self.max_iter,
+#                   self.no_of_clusters,
+#                   self.random_state,
+#                   self.n_init,
+#                   self.n_jobs,
+#               ],
+#           ),
+#           ppg.FunctionInvariant(self.name + "_fit", self.fit),
+#       ]
 
 
 class DBSCAN(ClusteringMethod):
@@ -1258,8 +1306,6 @@ class ScipyAgglomerative(ClusteringMethod):
         """
         Now transformation and imputation is realised in ML, we assume that the dataframe we have is already fully transformaed and scaled
         """
-        print(df.as_matrix())
-        raise ValueError()
         self.model = scipy.cluster.hierarchy.linkage(
             df.as_matrix(), method=self.linkage, metric=self.affinity
         )

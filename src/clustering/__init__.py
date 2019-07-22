@@ -4,6 +4,10 @@ Created on Aug 28, 2015
 
 @author: mernberger
 '''
+__author__ = "MarcoMernberger"
+__copyright__ = "MarcoMernberger"
+__license__ = "mit"
+
 from pkg_resources import get_distribution, DistributionNotFound
 
 try:

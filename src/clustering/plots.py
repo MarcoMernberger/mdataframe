@@ -410,6 +410,7 @@ def generate_heatmap_simple_figure(
     if show_column_label:
         plt.gca().set_xticks(range(len(df.columns)))
         plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
+    plt.gca().set_yticklabels([])
     # set the title
     if title is not None:
         plt.title(title, fontsize=fontsize_title)
