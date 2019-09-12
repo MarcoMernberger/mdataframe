@@ -8,6 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as grid
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from cycler import cycler
 
 def generate_heatmap_figure(
     df,
@@ -416,4 +417,94 @@ def generate_heatmap_simple_figure(
         plt.title(title, fontsize=fontsize_title)
     plt.tight_layout()
     plt.close()
+    return f
+
+def generate_dr_plot(df,
+    title=None,
+    class_label_column = 'class_labels',
+    **params):
+    """
+    This assumes that self.transformed_matrix is an array-like object with shape (n_samples, n_components)
+    """
+    fontsize_title = params.get("fontsize_title", 12)
+    custom_order = params.get("custom_order", None)
+    show_names = params.get("show_names", False)
+    x_suffix = params.get("xlabel", "")
+    y_suffix = params.get("ylabel", "")
+    dpi = params.get("dpi", 300)
+    fig_x = params.get("fig_x", 8)
+    fig_y = params.get("fig_x", 8)
+    f = plt.figure(
+        figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
+        )
+    columns_to_use = list(df.columns.values)
+    class_labels = class_label_column in df.columns
+    labels = "labels" in df.columns
+    if class_labels:
+        columns_to_use.remove(class_label_column)
+        if custom_order is not None:
+            df["custom_order"] = [custom_order.find(label) for label in df[class_label_column].values]
+            df = df.sort_values("custom_order")
+    else:
+        df[class_label_column] = [""]*len(df)
+    if not labels:
+        df['labels'] = df.index
+    else:
+        columns_to_use.remove('labels')
+    dimensions = params.get("dimension", len(df.columns))
+    if dimensions < 2:
+        raise ValueError(f"No 2D projection possible with only {dimensions} components, set k >= 2.")
+    if len(columns_to_use) > 2:
+        columns_to_use = columns_to_use[:2]
+    #markers = itertools.cycle(('o', 'v', '^', '*', 's', '+'))
+    custom_cycler = (cycler(color=["b", "g", "r", "c", "k", "m", "y", "grey"]) +
+                cycler(marker=['o', 'v', '^', '*', 's', '<', '>', '+'])
+                )        
+    plt.gca().set_prop_cycle(custom_cycler)
+    #ax_data = figure.add_subplot(111)            
+    print(df)
+    for i, df_sub in df.groupby(class_label_column):
+        plt.plot(df_sub[columns_to_use[0]].values, df_sub[columns_to_use[1]].values, marker = "o", markersize=7, alpha=0.5, label=i, linestyle="None")
+#    raise ValueError()
+    """
+    if class_label_dict is not None:
+        df['class_label'] = [class_label_dict[instance_id] for instance_id in ids]            
+    if 'class_label' in df.columns:
+        if class_order is None:
+            labels = list(set(class_label_dict.values()))
+        else:
+            labels = class_order
+        for i, label in enumerate(labels):
+            df_sub = df[df['class_label'] == label][matrix_columns]
+            matrix_sub = df_sub.as_matrix()
+            ax_data.plot(matrix_sub[:,0],matrix_sub[:,1], marker = next(markers), markersize=7, alpha=0.5, label=label, linestyle="None")
+        plt.title('Transformed samples with class labels')
+    else:
+        color = 'blue'
+        if color_callable is not None:
+            color = color_callable(ids)
+        #ax_data.scatter(self.transformed_matrix[:,0], self.transformed_matrix[:,1], marker = 'o', c=color, cmap = 'plasma', alpha=0.5)
+    """
+    if title is not None:
+        plt.title(title, fontsize = fontsize_title)
+    elif class_labels:
+        plt.title('Transformed samples with classes', fontsize = fontsize_title)
+    else:
+        plt.title('Transformed samples without classes', fontsize = fontsize_title)
+    xmin = df[columns_to_use[0]].values.min()
+    ymin = df[columns_to_use[1]].values.min()
+    xmax = df[columns_to_use[0]].values.max()
+    ymax = df[columns_to_use[1]].values.max()
+    plt.gca().set_xlim([1.3*xmin, 1.3*xmax])
+    plt.gca().set_ylim([1.3*ymin, 1.3*ymax])
+    plt.gca().set_xlabel(f"{columns_to_use[0]}{x_suffix}")
+    plt.gca().set_ylabel(f"{columns_to_use[1]}{y_suffix}")
+    if class_labels:
+        plt.gca().legend()
+    if show_names:
+        for i, row in df.iterrows():
+            plt.annotate(
+                row['labels'], 
+                xy = (row[columns_to_use[0]], row[columns_to_use[1]]), xytext = (-1, 1),
+                textcoords = 'offset points', ha = 'right', va = 'bottom', size = 8)
     return f

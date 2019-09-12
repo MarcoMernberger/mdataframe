@@ -25,7 +25,8 @@ import math
 import matplotlib.gridspec as grid
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pathlib import Path
-from .plots import generate_heatmap_figure, generate_heatmap_simple_figure
+from . import plots
+from . import strategies
 import functools
 import collections
 
@@ -187,8 +188,11 @@ class ML(object):
         self.cache_dir = Path("cache") / "ML" / self.name
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.predecessor = predecessor
-        if self.predecessor is not None:
-            self.result_dir = self.predecessor.result_dir.parent / self.name
+        result_dir = kwargs.get("result_dir", None)
+        if result_dir is not None:
+            self.result_dir = result_dir
+        elif self.predecessor is not None:
+            self.result_dir = self.predecessor.result_dir / self.name
         elif hasattr(genes_or_df_or_loading_function, "result_dir"):
             self.result_dir = genes_or_df_or_loading_function.result_dir / self.name
             if "row_labels" not in kwargs:
@@ -236,6 +240,12 @@ class ML(object):
             self.row_f = self.predecessor.row_f
             self.col_f = self.predecessor.col_f
         self.set_labels(self.row_f, self.col_f)
+
+    def __register_attribute():
+        pass
+
+    def register_synonym():
+        pass
 
     def load(self):
         """Resolves all load dependencies."""
@@ -289,7 +299,6 @@ class ML(object):
         def __load(dictionary_with_attributes):
             for attr_name in dictionary_with_attributes:
                 setattr(self, attr_name, dictionary_with_attributes[attr_name])
-
         return (
             ppg.CachedDataLoadingJob(
                 os.path.join(self.cache_dir, self.name + "_load"), __calc, __load
@@ -309,6 +318,7 @@ class ML(object):
                     if row_labels is not None:
                         if isinstance(row_labels, str):
                             if row_labels not in self.df_full.columns:
+                                print(self.df)
                                 raise ValueError(
                                     f"Column given by row_labels = {row_labels} not in {self.df_full.columns}."
                                 )
@@ -700,7 +710,7 @@ class ML(object):
         """
         strategy = clustering_strategy
         if clustering_strategy is None:
-            strategy = NewKMeans("KNN", 2)
+            strategy = strategies.NewKMeans("KNN", 2)
         new_name = "{}_Cl({})_axis_{}".format(self.name, strategy.name, axis)
         deps = self.dependencies + [
             self.load(),
@@ -711,7 +721,7 @@ class ML(object):
         ]
 
         def __do_cluster():
-            if not isinstance(strategy, ClusteringMethod):
+            if not isinstance(strategy, strategies.ClusteringMethod):
                 raise ValueError(
                     "Please supply a valid clustering strategy. Needs to be an instance of {}"
                 )
@@ -749,6 +759,139 @@ class ML(object):
             self,
         )
 
+    def cluster(self, clustering_strategy=None, axis=1, **fit_parameter):
+        """
+        This defines the clustering model, fits the data and adds the trained model as attribute to self.
+        """
+        strategy = clustering_strategy
+        if clustering_strategy is None:
+            strategy = strategies.NewKMeans("KNN", 2)
+        new_name = "{}_Cl({})_axis_{}".format(self.name, strategy.name, axis)
+        deps = self.dependencies + [
+            self.load(),
+            ppg.ParameterInvariant(
+                new_name + "_params", [axis, fit_parameter] + strategy.invariants
+            ),
+            ppg.FunctionInvariant(new_name + "_func", strategy.fit),
+        ]
+
+        def __do_cluster():
+            if not isinstance(strategy, strategies.ClusteringMethod):
+                raise ValueError(
+                    "Please supply a valid clustering strategy. Needs to be an instance of {}"
+                )
+            df = self.df
+            if axis == 0:
+                df = df.transpose()
+            strategy.fit(df, **fit_parameter)
+            df_full = self.df_full
+            columns = self.columns
+            rows = self.rows
+            if axis == 0:
+                df_full = df_full.append(strategy.clusters.transpose())
+                df_full.loc[strategy.name] = df_full.loc[strategy.name].fillna(-1)
+                df = df.transpose()
+            else:
+                df_full = df_full.join(strategy.clusters)
+                df_full[strategy.name] = df_full[strategy.name].fillna(-1)
+            return {
+                strategy.name: strategy,
+                "df_full": df_full,
+                "df": df,
+                "columns": df.columns.values,
+                "rows": df.index.values,
+            }
+
+        deps.append(ppg.FunctionInvariant(new_name + "_do_Cluster", __do_cluster))
+        return ML(
+            new_name,
+            __do_cluster,
+            self.columns,
+            self.rows,
+            self.index_column,
+            deps,
+            self.annotators,
+            self,
+        )
+
+    def reduce(self, dimensionality_reduction=None, axis=1, name = None, **fit_parameter):
+        """
+        This performas a dimensionality reduction on df and returns a new ML wich now contains the reduced matrix.
+        """
+        strategy = dimensionality_reduction
+        if dimensionality_reduction is None:
+            strategy = strategies.SklearnPCA("PCA")
+        if name is None:
+            new_name = "{}_Cl({})_axis_{}".format(self.name, strategy.name, axis)
+        else:
+            new_name = name
+        deps = self.dependencies + [
+            self.load(),
+            ppg.ParameterInvariant(
+                new_name + "_params", [axis, fit_parameter] + strategy.invariants
+            ),
+            ppg.FunctionInvariant(new_name + "_func", strategy.fit),
+        ]
+        new_index = [f"Dim {i+1}" for i in range(strategy.dimensions)]
+        new_resdir = self.result_dir.parent / new_name
+        def __do_reduce():
+            if not isinstance(strategy, strategies.DimensionalityReduction):
+                raise ValueError(
+                    "Please supply a valid clustering strategy. Needs to be an instance of {}"
+                )
+            df = self.df
+            df_full = self.df_full
+            print(df)
+            if axis == 1:
+                df = df.transpose()
+                df_full = df_full.transpose()
+            strategy.fit(df, **fit_parameter)
+            df_full = self.df_full
+            columns = self.columns
+            rows = self.rows
+            ret = {}
+            if axis == 1:
+                #samples are reduced ...
+                df = df.transpose()
+                new_df = pd.DataFrame(strategy.reduced_matrix.transpose(), index = new_index, columns = df.columns)
+                df = new_df.transpose()
+                df_full = df #makes no sense to preserve the other columns
+            else:
+                #this clusters genes
+                df_new = pd.DataFrame(strategy.reduced_matrix, columns = new_index, index = df.index)
+                df_full = df_full.join(new_df)
+                df = df_new
+            rows = df.index.values
+            columns = df.columns.values
+            return {
+                strategy.name: strategy,
+                "df_full": df_full,
+                "df": df,
+                "columns": columns,
+                "rows": rows
+            }
+    
+        deps.append(ppg.FunctionInvariant(new_name + "__do_reducefunc", __do_reduce))
+        if axis == 1:
+            row_f = self.col_f
+            col_f = None
+        else:
+            row_f = None
+            col_f = self.row_f
+        return ML(
+            new_name,
+            __do_reduce,
+            self.columns,
+            self.rows,
+            self.index_column,
+            deps,
+            self.annotators,
+            row_labels = row_f,
+            column_labels = col_f,
+            result_dir = new_resdir
+            )
+        
+    
     def write(self, index=False, row_nice=False, column_nice=False):
         outfile = self.result_dir / (self.name + ".tsv")
         self.result_dir.mkdir(parents=True, exist_ok=True)
@@ -784,7 +927,7 @@ class ML(object):
 
         def __plot():
             df = self.__labels_nice()
-            figure = generate_heatmap_simple_figure(
+            figure = plots.generate_heatmap_simple_figure(
                 df, title, show_column_label=show_column_label, **params
             )
             figure.savefig(outfile)
@@ -828,7 +971,7 @@ class ML(object):
 
         def __plot():
             df = self.__labels_nice()
-            figure = generate_heatmap_figure(
+            figure = plots.generate_heatmap_figure(
                 df,
                 title,
                 display_linkage_column=display_linkage_column,
@@ -907,7 +1050,7 @@ class ML(object):
                 fro = df.index[index]
                 to = df.index[min(index + max_rows_per_page, len_y - 1)]
                 df_sub = df.loc[fro:to]
-                fig = generate_heatmap_figure(
+                fig = plots.generate_heatmap_figure(
                     df_sub,
                     title,
                     display_linkage_column=display_linkage_column,
@@ -947,374 +1090,66 @@ class ML(object):
             .depends_on(params_job)
         )
 
-
-class ClusteringMethod:
-    def __init__(self, name, invariants):
-        """
-        This is a wrapper for any clustering approach. 
-        @param name of the clustering strategy
-        """
-        self.__name = name
-        self.__invariants = invariants
-
-    @property
-    def invariants(self):
-        return self.__invariants
-
-    @property
-    def name(self):
-        return self.__name
-
-    def fit(self, df, **fit_parameter):
-        self.model = self.clustering.fit(df, fit_parameter)
-        cluster_ids = self.model.labels_
-        index = df.index.values
-        self.clusters = pd.DataFrame({self.name: cluster_ids}, index=index)
-
-    def predict(self, df_other, imputer, scaler, **fit_parameter):
-        df_imputed_other = df_other.transform(imputer.transform)
-        df_imputed_other = df_imputed_other[df_imputed_other.max(axis=1) > 0]
-        df_scaled_other = df_imputed_other.transform(scaler.transform)
-        return self.model.predict(df_scaled_other.values, **fit_parameter)
-
-
-class NewKMeans(ClusteringMethod):
-    def __init__(
+    def plot_2d(
         self,
-        name,
-        no_of_clusters=2,
-        n_init=10,
-        max_iter=300,
-        random_state=None,
-        n_jobs=1,
-        init="k-means++",
-    ):
-        """
-        This is a wrapper for Kmeans
-        @param name
-        @param no_of_clusters number of clusters
-        @param init 'k-means++', 'random' or ndarray of centroids
-        @param max_iter max iterations til convergence
-        """
-        self.__no_of_clusters = no_of_clusters
-        self.__n_init = n_init
-        self.__max_iter = max_iter
-        self.__random_state = random_state
-        self.__n_jobs = n_jobs
-        self.__init = init
-        invariants = [
-            self.__no_of_clusters,
-            self.__init,
-            self.__n_jobs,
-            self.__random_state,
-            self.__max_iter,
-            self.__n_init,
-        ]
-        super().__init__(name, invariants)
-        self.__clustering = sklearn.cluster.KMeans(
-            n_clusters=self.__no_of_clusters,
-            init="k-means++",
-            n_init=self.__n_init,
-            max_iter=self.__max_iter,
-            algorithm="auto",
-            tol=0.0001,
-            precompute_distances="auto",
-            verbose=0,
-            random_state=self.__random_state,
-            copy_x=True,
-            n_jobs=self.__n_jobs,
-        )
-
-    @property
-    def clustering(self):
-        return self.__clustering
-
-
-#    def get_dependencies(self):
-#        return [
-#            ppg.ParameterInvariant(
-#                self.name + "parameters",
-#               [
-#                   self.n_init,
-#                   self.max_iter,
-#                   self.no_of_clusters,
-#                   self.random_state,
-#                   self.n_init,
-#                   self.n_jobs,
-#               ],
-#           ),
-#           ppg.FunctionInvariant(self.name + "_fit", self.fit),
-#       ]
-
-
-class DBSCAN(ClusteringMethod):
-    def __init__(
-        self,
-        name,
-        scaler=None,
-        imputer=None,
-        missing_value=np.NaN,
-        cluster_columns=False,
-        eps=0.5,
-        min_samples=5,
-        metric="euclidean",
-        algorithm="auto",
-        leaf_size=30,
-        p=None,
-        n_jobs=1,
+        outfile=None,
+        title=None,
+        class_label_column = None,
+        show_names = False,
         dependencies=[],
+        **params,
     ):
-        """
-        This is a wrapper for DBSCAN
-        @param eps maximum neighborhood distance
-        @param min_samples = minimum number of neighbors for a point to be a valid core point
-        @param metric distance metric, allowed is string (metrics.pairwise.calculate_distance) or callable
-        @param algorithm nearest neighbor algorithm, allowed is 'auto', 'ball_tree', 'kd_tree' or 'brute'
-        @param leaf_size leaf_size passed to ball_tree or kd_tree
-        @param p power for minkowski metric to calculate distances
-        """
-        self.eps = eps
-        self.name = name
-        self.min_samples = min_samples
-        self.metric = metric
-        self.algorithm = algorithm
-        self.leaf_size = leaf_size
-        self.p = p
-        self.n_jobs = n_jobs
-        dependencies += [
-            ppg.ParameterInvariant(
-                self.name + "_parameters",
-                [eps, p, min_samples, metric, algorithm, leaf_size, p],
-            ),
-            ppg.FunctionInvariant(self.name + "_fit", self.fit),
-        ]
-        ClusteringMethod.__init__(self, name)
-        self.clustering = sklearn.cluster.DBSCAN(
-            eps=self.eps,
-            min_samples=self.min_samples,
-            metric=self.metric,
-            algorithm=self.algorithm,
-            leaf_size=self.leaf_size,
-            p=self.p,
-            n_jobs=self.n_jobs,
+        dependencies.append(self.load())
+        dependencies.append(self.predecessor.load())
+        if outfile is None:
+            outfile = Path(self.result_dir) / f"{self.name}_2d.png"
+        elif isinstance(outfile, str):
+            outfile = Path(outfile)
+        outfile.parent.mkdir(parents=True, exist_ok=True)
+        row_labels = params.get('label_dict', None)
+        def __plot():
+            df = self.__labels_nice()
+            if class_label_column is not None:
+                if not class_label_column in self.df_full.columns:
+                    raise ValueError(f"No class label column {class_label_column} in df_full.")
+                else:
+                    df[class_label_column] = self.df_full[class_label_column].values
+            if row_labels is not None:
+                tmp = []
+                for i in df.index:
+                    tmp.append(row_labels[i])
+                df['labels'] = tmp
+            xlabel = ""
+            ylabel = ""
+            if hasattr(self.predecessor, 'PCA'):
+                xlabel = f" explained variance = {self.predecessor.PCA.explained_variance_ratio[0]*100:.2f}%"
+                ylabel = f" explained variance = {self.predecessor.PCA.explained_variance_ratio[1]*100:.2f}%"
+            figure = plots.generate_dr_plot(
+                df,
+                title,
+                class_label_column,
+                xlabel = xlabel,
+                ylabel = ylabel,
+                show_names = show_names,
+                **params                
+                ) 
+            figure.savefig(outfile)
+            df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
+
+        row_s = self.row_f
+        col_s = self.col_f
+        if callable(row_s):
+            row_s = row_s.__name__
+        if callable(col_s):
+            col_s = col_s.__name__
+
+        params_job = ppg.ParameterInvariant(
+            outfile.name + "_2d",
+            list(params)
+            + [
+                title,
+            ],
         )
-        self.clustering.predict = self.clustering.fit_predict
-
-    def get_dependencies(self):
-        return [
-            ppg.ParameterInvariant(
-                self.name + "parameters",
-                [
-                    self.eps,
-                    self.min_samples,
-                    self.metric,
-                    self.algorithm,
-                    self.leaf_size,
-                    self.p,
-                    self.n_jobs,
-                ],
-            )
-        ]
-
-
-class SKlearnAgglomerative(ClusteringMethod):
-    def __init__(
-        self,
-        name,
-        no_of_clusters=2,
-        affinity="euclidean",
-        linkage="ward",
-        connectivity=None,
-        compute_full_tree="auto",
-        memory=None,
-    ):
-        """
-        This is a wrapper for Agglomerativeclustering from SKlearn
-        @param genes_or_df_or_loading_function can be either genes, df or a loading function
-        @param init 'k-means++', 'random' or ndarray of centroids
-        @param max_iter max iterations til convergence
-        @param cluster columns should we cluster columns?
-        @params cluster_rows should we cluster rows?
-        """
-        self.name = name
-        self.no_of_clusters = no_of_clusters
-        self.affinity = affinity
-        self.linkage = linkage
-        self.connectivity = connectivity
-        self.compute_full_tree = compute_full_tree
-        self.memory = memory
-        ClusteringMethod.__init__(self, name)
-        self.clustering = sklearn.cluster.AgglomerativeClustering(
-            n_clusters=self.no_of_clusters,
-            affinity=self.affinity,
-            memory=self.memory,
-            connectivity=self.connectivity,
-            compute_full_tree=self.compute_full_tree,
-            linkage=self.linkage,
-        )
-        self.clustering.predict = self.clustering.fit_predict
-
-    def get_dependencies(self):
-        return [
-            ppg.ParameterInvariant(
-                self.name + "parameters",
-                [
-                    self.no_of_clusters,
-                    self.affinity,
-                    self.linkage,
-                    self.connectivity,
-                    self.compute_full_tree,
-                    self.memory,
-                ],
-            )
-        ]
-
-    def new_fit_function(self):
-        """
-        This is intended to replace the original  sklearn fit function of the clustering,
-        slightly altered as I want the distances between the clusters as well.
-        """
-
-        def my_fit(self, X, y=None):
-            """Fit the hierarchical clustering on the data
-            Parameters
-            ----------
-            X : array-like, shape = [n_samples, n_features]
-                Training data. Shape [n_samples, n_features], or [n_samples,
-                n_samples] if affinity=='precomputed'.
-            y : Ignored
-            Returns
-            -------
-            self
-            """
-            X = sklearn.cluster.hierarchical.check_array(
-                X, ensure_min_samples=2, estimator=self
-            )
-            memory = sklearn.cluster.hierarchical.check_memory(self.memory)
-
-            if self.n_clusters <= 0:
-                raise ValueError(
-                    "n_clusters should be an integer greater than 0."
-                    " %s was provided." % str(self.n_clusters)
-                )
-
-            if self.linkage == "ward" and self.affinity != "euclidean":
-                raise ValueError(
-                    "%s was provided as affinity. Ward can only "
-                    "work with euclidean distances." % (self.affinity,)
-                )
-
-            if self.linkage not in sklearn.cluster.hierarchical._TREE_BUILDERS:
-                raise ValueError(
-                    "Unknown linkage type %s. "
-                    "Valid options are %s"
-                    % (self.linkage, sklearn.cluster.hierarchical._TREE_BUILDERS.keys())
-                )
-            tree_builder = sklearn.cluster.hierarchical._TREE_BUILDERS[self.linkage]
-
-            connectivity = self.connectivity
-            if self.connectivity is not None:
-                if callable(self.connectivity):
-                    connectivity = self.connectivity(X)
-                connectivity = check_array(
-                    connectivity, accept_sparse=["csr", "coo", "lil"]
-                )
-
-            n_samples = len(X)
-            compute_full_tree = self.compute_full_tree
-            if self.connectivity is None:
-                compute_full_tree = True
-            if compute_full_tree == "auto":
-                # Early stopping is likely to give a speed up only for
-                # a large number of clusters. The actual threshold
-                # implemented here is heuristic
-                compute_full_tree = self.n_clusters < max(100, 0.02 * n_samples)
-            n_clusters = self.n_clusters
-            if compute_full_tree:
-                n_clusters = None
-
-            # Construct the tree
-            kwargs = {"return_distance": True}
-            if self.linkage != "ward":
-                kwargs["linkage"] = self.linkage
-                kwargs["affinity"] = self.affinity
-            self.children_, self.n_components_, self.n_leaves_, parents, self.distances = memory.cache(
-                tree_builder
-            )(
-                X, connectivity, n_clusters=n_clusters, **kwargs
-            )
-            # Cut the tree
-            if compute_full_tree:
-                self.labels_ = sklearn.cluster.hierarchical._hc_cut(
-                    self.n_clusters, self.children_, self.n_leaves_
-                )
-            else:
-                labels = sklearn.cluster.hierarchical._hierarchical.hc_get_heads(
-                    parents, copy=False
-                )
-                # copy to avoid holding a reference on the original array
-                labels = np.copy(labels[:n_samples])
-                # Reassign cluster numbers
-                self.labels_ = np.searchsorted(np.unique(labels), labels)
-            return self
-
-        return my_fit
-
-    def fit(self, df, **fit_parameter):
-        fitter = self.new_fit_function()
-        self.model = fitter(self.clustering, df)
-        cluster_ids = self.model.labels_
-        index = df.index.values
-        self.clusters = pd.DataFrame({self.name: cluster_ids}, index=index)
-
-    def get_linkage(self):
-        number_of_observations = len(df)
-        observations = dict([(x, 1) for x in range(number_of_observations)])
-        current = 0
-        ret = []
-        for ii, item in enumerate(zip(self.model.children_, self.model.distances)):
-            x = item[0]
-            distance = item[1]
-            o = observations[x[0]] + observations[x[1]]
-            observations[number_of_observations + ii] = o
-            ret.append([x[0], x[1], distance, o])
-        return np.array(ret, dtype=float)
-
-
-class ScipyAgglomerative(ClusteringMethod):
-    def __init__(
-        self, name, no_of_clusters=2, threshold=2, affinity="euclidean", linkage="ward"
-    ):
-        """
-        This is a wrapper for hierarchical clustering from scipy. Use this if you want dendrograms.
-        """
-        self.no_of_clusters = no_of_clusters
-        self.threshold = threshold
-        self.affinity = affinity
-        self.linkage = linkage
-        ClusteringMethod.__init__(self, name)
-
-    def get_dependencies(self):
-        return [
-            ppg.ParameterInvariant(
-                self.name + "parameters",
-                [self.no_of_clusters, self.threshold, self.affinity, self.linkage],
-            )
-        ]
-
-    def fit(self, df, **fit_params):
-        """
-        Now transformation and imputation is realised in ML, we assume that the dataframe we have is already fully transformaed and scaled
-        """
-        self.model = scipy.cluster.hierarchy.linkage(
-            df.as_matrix(), method=self.linkage, metric=self.affinity
-        )
-        cluster_ids = scipy.cluster.hierarchy.fcluster(self.model, self.threshold)
-        index = df.index.values
-        self.clusters = pd.DataFrame({self.name: cluster_ids}, index=index)
-
-    def predict(self, df_other, sample_weights):
-        return None
-
-    def get_linkage(self):
-        return self.model
+        return ppg.FileGeneratingJob(outfile, __plot).depends_on(dependencies).depends_on(params_job)
+        
+    

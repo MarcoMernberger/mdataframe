@@ -21,4 +21,4 @@ finally:
 
 
 from .clustering import *
-#from .pca import PCA, MyPCA, SklearnPCA, MlabPCA, MDS, LDA, TSNE
+from .strategies import *
