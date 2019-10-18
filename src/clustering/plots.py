@@ -457,14 +457,14 @@ def generate_dr_plot(df,
     if len(columns_to_use) > 2:
         columns_to_use = columns_to_use[:2]
     #markers = itertools.cycle(('o', 'v', '^', '*', 's', '+'))
-    custom_cycler = (cycler(color=["b", "g", "r", "c", "k", "m", "y", "grey"]) +
-                cycler(marker=['o', 'v', '^', '*', 's', '<', '>', '+'])
+    custom_cycler = (cycler(color=["b", "g", "r", "c", "k", "m", "y", "grey", "darkblue", "darkgreen", "darkred", "darkcyan", "darkviolet", "gold", "slategrey"]) +
+                cycler(marker=['o', 'v', '^', '*', 's', '<', '>', '+', 'o', 'v', '^', '*', 's', '<', '>'])
                 )        
     plt.gca().set_prop_cycle(custom_cycler)
     #ax_data = figure.add_subplot(111)            
     print(df)
     for i, df_sub in df.groupby(class_label_column):
-        plt.plot(df_sub[columns_to_use[0]].values, df_sub[columns_to_use[1]].values, marker = "o", markersize=7, alpha=0.5, label=i, linestyle="None")
+        plt.plot(df_sub[columns_to_use[0]].values, df_sub[columns_to_use[1]].values, marker = "o", markersize=7, alpha=0.8, label=i, linestyle="None")
 #    raise ValueError()
     """
     if class_label_dict is not None:
