@@ -199,7 +199,11 @@ class ClassLabel(ClusteringMethod):
         super().__init__(name, [class_label_dict])
 
     def fit(self, df, **fit_parameter):
-        cluster_ids = [self.__class_label_dict[key] for key in df.index.values]
+        try:
+            cluster_ids = [self.__class_label_dict[key] for key in df.index.values]
+        except KeyError():
+            print("Keys : ", self.__class_label_dict.keys())
+            raise
         index = df.index.values
         self.clusters = pd.DataFrame({self.name: cluster_ids}, index=index)
 

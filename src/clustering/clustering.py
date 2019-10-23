@@ -247,6 +247,11 @@ class ML(object):
     def register_synonym():
         pass
 
+    def __getattr__(self, name):
+        def method(*args):
+            return self.transform(name, *args)
+        return method
+
     def load(self):
         """Resolves all load dependencies."""
 
@@ -645,25 +650,20 @@ class ML(object):
         def __scale():
             df_scaled = self.df
             for ttype, transformation in transforms:
-                if ttype == 0:
+                if ttype == 0: #callable
                     if axis == 0:
                         df_scaled = df_scaled.apply(transformation, axis=0)
                     else:
-                        print(str(transformation))
-                        if not ("ImputeFixed" in str(transformation)):
-                            print(df_scaled)
-                            print("----------------", transformation)
-                            df_scaled = (
+                        df_scaled = (
                                 df_scaled.transpose()
                                 .apply(transformation, axis=0)
                                 .transpose()
                             )
-                            print(df_scaled)
-                            # raise ValueError()
-                if ttype == 1:
+                if ttype == 1: #pandas method
                     func = getattr(df_scaled, transformation)
                     df_scaled = func()
-                if ttype == 2:
+
+                if ttype == 2: #list of pandas methods
                     func = getattr(df_scaled, transformation[0])
                     df_scaled = func(*transformation[1], **transformation[2])
             df_full = self.df_full.copy()
@@ -841,7 +841,6 @@ class ML(object):
                 )
             df = self.df
             df_full = self.df_full
-            print(df)
             if axis == 1:
                 df = df.transpose()
                 df_full = df_full.transpose()
@@ -851,14 +850,13 @@ class ML(object):
             rows = self.rows
             ret = {}
             if axis == 1:
-                #samples are reduced ...
-                df = df.transpose()
-                new_df = pd.DataFrame(strategy.reduced_matrix.transpose(), index = new_index, columns = df.columns)
+                #columns are data points ...
+                new_df = pd.DataFrame(strategy.reduced_matrix.transpose(), index = new_index, columns = df.index)
                 df = new_df.transpose()
                 df_full = df #makes no sense to preserve the other columns
             else:
-                #this clusters genes
-                df_new = pd.DataFrame(strategy.reduced_matrix, columns = new_index, index = df.index)
+                #rows are data points
+                df_new = pd.DataFrame(strategy.reduced_matrix, index = df.index, columns = new_index)
                 df_full = df_full.join(new_df)
                 df = df_new
             rows = df.index.values
