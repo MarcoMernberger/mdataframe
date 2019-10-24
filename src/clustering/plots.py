@@ -40,6 +40,7 @@ def generate_heatmap_figure(
     colormap = params.get("colormap", "seismic")
     vmax = params.get("vmax", df.max().max())
     vmin = params.get("vmin", df.min().min())
+    aspect = params.get("aspect", "auto")
     dodge = params.get("dodge", 0)
     if "row_label_inches" in params:
         row_label_inches = params["row_label_inches"]
@@ -209,7 +210,7 @@ def generate_heatmap_figure(
     )
 
     # actually plot the heatmap
-    im = ax_matrix.imshow(df, cmap=colormap, norm=norm, aspect="auto")
+    im = ax_matrix.imshow(df, cmap=colormap, norm=norm, aspect=aspect)
 
     # add the color scale axis
     if legend_location is not None:
@@ -386,6 +387,7 @@ def generate_heatmap_simple_figure(
     df,
     title=None,
     show_column_label=True,
+    show_row_label = False,
     **params
 ):
     """
@@ -395,22 +397,28 @@ def generate_heatmap_simple_figure(
     """
     fontsize_title = params.get("fontsize_title", 12)
     fontsize_columns = params.get("fontsize_column", 12)
+    fontsize_rows = params.get("fontsize_rows", 12)
     dpi = params.get("dpi", 300)
     fig_x = params.get("fig_x", 8)
     fig_y = params.get("fig_x", 16)
+    shrink = params.get("shrink", 1)
     f = plt.figure(
         figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
     )
     colormap = params.get("colormap", "seismic")
     vmax = params.get("vmax", df.max().max())
     vmin = params.get("vmin", df.min().min())
+    aspect = params.get("aspect", "auto")
     norm = matplotlib.colors.Normalize(vmin, vmax)
-    im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect="auto")
-    plt.colorbar(im)
+    im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect = aspect)
+    plt.colorbar(im, shrink = shrink)
     # add the labels
     if show_column_label:
         plt.gca().set_xticks(range(len(df.columns)))
         plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
+    if show_row_label:
+        plt.gca().set_yticks(range(len(df.index)))
+        plt.gca().set_yticklabels(df.index.values, rotation=75, ha="right", fontsize=fontsize_rows)
     plt.gca().set_yticklabels([])
     # set the title
     if title is not None:

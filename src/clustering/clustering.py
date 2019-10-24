@@ -165,7 +165,7 @@ class ML(object):
         index_column=None,
         dependencies=[],
         annotators=[],
-        predecessor=None,
+        predecessor_objects={},
         **kwargs,
     ):
         """
@@ -187,18 +187,15 @@ class ML(object):
         self.annotators = annotators
         self.cache_dir = Path("cache") / "ML" / self.name
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.predecessor = predecessor
+        self.predecessor_objects = predecessor_objects
         result_dir = kwargs.get("result_dir", None)
-        if result_dir is not None:
-            self.result_dir = result_dir
-        elif self.predecessor is not None:
-            self.result_dir = self.predecessor.result_dir / self.name
-        elif hasattr(genes_or_df_or_loading_function, "result_dir"):
-            self.result_dir = genes_or_df_or_loading_function.result_dir / self.name
-            if "row_labels" not in kwargs:
-                kwargs["row_labels"] = "name"
-        else:
-            self.result_dir = Path("results") / self.name
+        if result_dir is None:
+            if hasattr(genes_or_df_or_loading_function, "result_dir"):
+                self.result_dir = genes_or_df_or_loading_function.result_dir / self.name
+                if "row_labels" not in kwargs:
+                    kwargs["row_labels"] = "name"
+            else:
+                self.result_dir = Path("results") / "ML" / self.name
         self.result_dir.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(
             self.df_or_gene_or_loading_function, mbf_genomics.regions.GenomicRegions
@@ -234,12 +231,14 @@ class ML(object):
         self.dependencies.append(
             ppg.ParameterInvariant(self.name + "_rowid", self.index_column)
         )
-        self.row_f = kwargs.get("row_labels", None)
-        self.col_f = kwargs.get("column_labels", None)
-        if self.row_f is None and self.col_f is None and self.predecessor is not None:
-            self.row_f = self.predecessor.row_f
-            self.col_f = self.predecessor.col_f
-        self.set_labels(self.row_f, self.col_f)
+        self.row_labels = kwargs.get("row_labels", None)
+        self.column_labels = kwargs.get("column_labels", None)
+        self.dependencies.append(
+            ppg.ParameterInvariant(
+                self.name + "_kwargs",
+                    list(kwargs),
+                )
+        )
 
     def __register_attribute():
         pass
@@ -260,20 +259,20 @@ class ML(object):
             if isinstance(
                 self.df_or_gene_or_loading_function, mbf_genomics.genes.Genes
             ):
-                df_full = self.df_or_gene_or_loading_function.df
-                df_full.index = df_full["gene_stable_id"]
+                df = self.df_or_gene_or_loading_function.df
+                df.index = df["gene_stable_id"]
             elif isinstance(self.df_or_gene_or_loading_function, pd.DataFrame):
-                df_full = self.df_or_gene_or_loading_function
+                df = self.df_or_gene_or_loading_function
             elif callable(self.df_or_gene_or_loading_function):
                 dict_or_df = self.df_or_gene_or_loading_function()
                 if isinstance(dict_or_df, pd.DataFrame):
-                    df_full = dict_or_df
+                    df = dict_or_df
                 elif isinstance(dict_or_df, dict):
                     try:
-                        df_full = dict_or_df["df_full"]
+                        df = dict_or_df["df"]
                     except KeyError:
                         raise ValueError(
-                            "Dictionary returned by df_or_gene_or_loading_function must contain the key df_full and the full dataframe."
+                            "Dictionary returned by df_or_gene_or_loading_function must contain the key df and the dataframe."
                         )
                     dictionary_with_attributes.update(dict_or_df)
                 else:
@@ -288,17 +287,30 @@ class ML(object):
                     % type(self.df_or_gene_or_loading_function)
                 )
             # trim the full dataframe according to the columns/rows given
-            if "df" not in dictionary_with_attributes:
-                df = df_full
-                if self.columns is None:
-                    self.columns = df_full.columns.values
-                if self.rows is None:
-                    self.rows = df_full.index.values
-                df = df[self.columns]
-                df = df.loc[self.rows]
-                dictionary_with_attributes["df"] = df
-            if "df_full" not in dictionary_with_attributes:
-                dictionary_with_attributes["df_full"] = df_full
+            if self.columns is None:
+                self.columns = df.columns.values
+            if self.rows is None:
+                self.rows = df.index.values
+            print(self.name)
+            additional_columns = [column for column in df.columns.values if column not in self.columns]
+            additional_rows = [row for row in df.index.values if row not in self.rows]
+            df_meta_rows = df.copy()
+            df_meta_rows = df_meta_rows[additional_columns]
+            if "df_meta_rows" in dictionary_with_attributes:
+                df_meta_rows = df_meta_rows.join(dictionary_with_attributes["df_meta_rows"])
+            df_meta_rows = df_meta_rows.loc[self.rows]
+            dictionary_with_attributes["df_meta_rows"] = df_meta_rows
+            df_meta_columns = df.copy().transpose()
+            df_meta_columns = df_meta_columns[additional_rows]
+            if "df_meta_columns" in dictionary_with_attributes:
+                df_meta_columns = df_meta_columns.join(dictionary_with_attributes["df_meta_columns"])    
+            df_meta_columns = df_meta_columns.loc[self.columns]
+            dictionary_with_attributes["df_meta_columns"] = df_meta_columns
+            df = df[self.columns]
+            df = df.loc[self.rows]
+            dictionary_with_attributes["df"] = df
+            assert df_meta_rows.index.equals(df.index)
+            assert df_meta_columns.index.equals(df.columns)
             return dictionary_with_attributes
 
         def __load(dictionary_with_attributes):
@@ -311,106 +323,6 @@ class ML(object):
             .depends_on(self.dependencies)
             .depends_on(ppg.FunctionInvariant(self.name + "_load_calc", __calc))
         )
-
-    def set_labels(self, row_labels=None, column_labels=None):
-        self.row_f = row_labels
-        self.col_f = column_labels
-
-        def verify_label_arguments(row_labels, col_labels):
-            def decorator_label_nice(func):
-                @functools.wraps(func)
-                def wrapper(*args, **kwargs):
-                    if row_labels is not None:
-                        if isinstance(row_labels, str):
-                            if row_labels not in self.df_full.columns:
-                                print(self.df)
-                                raise ValueError(
-                                    f"Column given by row_labels = {row_labels} not in {self.df_full.columns}."
-                                )
-                    if col_labels is not None:
-                        if isinstance(col_labels, str):
-                            if col_labels not in self.df.index.values:
-                                raise ValueError(
-                                    f"Row index given by column_labels={col_labels} not in {self.df.index}."
-                                )
-                    return func(*args, **kwargs)
-
-                return wrapper
-
-            return decorator_label_nice
-
-        def modify_df(modifier_func):
-            def decorator_func(func):
-                @functools.wraps(func)
-                def wrapper(*args, **kwargs):
-                    df = func(*args, **kwargs)
-                    df = modifier_func(df)
-                    return df
-
-                return wrapper
-
-            return decorator_func
-
-        @verify_label_arguments(row_labels=self.row_f, col_labels=self.col_f)
-        def __get_nice_df():
-            return self.df.copy()
-
-        if self.row_f is not None:
-            if isinstance(self.row_f, str):
-
-                def replace_index_column(df):
-                    new_index = self.df_full[self.row_f].values
-                    seen = collections.Counter()
-                    for i in range(len(new_index)):
-                        if new_index[i] in seen:
-                            new_index[i] = f"{new_index[i]}_({seen[new_index[i]]})"
-                        seen[new_index[i]] += 1
-                    df.index = new_index
-                    return df
-
-                modfunc = replace_index_column
-            elif isinstance(self.row_f, dict):
-
-                def replace_index_values(df, repl_dict=self.row_f):
-                    df.index = [
-                        repl_dict[rname] if rname in repl_dict else rname
-                        for rname in self.df.index.values
-                    ]
-                    return df
-
-                modfunc = replace_index_values
-            elif callable(self.row_f):
-                modfunc = self.row_f
-            else:
-                raise ValueError(f"Don't know what to do with that row_f {self.row_f}.")
-            __get_nice_df = modify_df(modfunc)(__get_nice_df)
-
-        if self.col_f is not None:
-            if isinstance(self.col_f, str):
-
-                def replace_index(df):
-                    df.columns = self.df.loc[self.col_f].values
-                    return df
-
-                modfunc = replace_index  # this is pretty useless
-            elif isinstance(self.col_f, dict):
-
-                def replace_index_values(df, repl_dict=self.col_f):
-                    df.columns = [
-                        repl_dict[rname] if rname in repl_dict else rname
-                        for rname in df.columns.values
-                    ]
-                    return df
-
-                modfunc = replace_index_values
-            elif callable(self.col_f):
-                modfunc = self.col_f
-            else:
-                raise ValueError(
-                    f"Don't know what to do with that column_f {self.col_f}."
-                )
-            __get_nice_df = modify_df(modfunc)(__get_nice_df)
-        self.__labels_nice = __get_nice_df
 
     def sort(self, *sorting_transformations, axis=0):
         """
@@ -507,38 +419,49 @@ class ML(object):
         deps.extend(self.get_dependencies() + [self.load()])
 
         def __scale():
-            df_scaled = self.df
-            df_full = self.df_full.copy()
+            df_scaled = self.df.copy()
+            df_meta_columns = self.df_meta_columns.copy()
+            df_meta_rows = self.df_meta_rows.copy()
             for sorting, by, ax, ac in sorts:
-                df_full = df_full.sort_values(by=by, axis=ax, ascending=ac)
-                if ax == 0:
-                    new_index = df_full.index
-                    df_scaled = df_scaled.loc[new_index]
+                if by in df_scaled.columns:
+                    df_scaled = df_scaled.sort_values(by=by, axis=ax, ascending=ac)
+                    if ax == 0:
+                        df_meta_rows = df_meta_rows.loc[df_scaled.index]
+                    else:
+                        df_meta_columns = df_meta_columns[df_scaled.columns]
                 else:
-                    new_index = df_full.columns
-                    df_scaled = df_scaled[new_index]
+                    if ax == 0: 
+                        print(by)
+                        print(df_meta_rows)
+                        print(df_scaled)
+                        df_meta_rows = df_meta_rows.sort_values(by=by, axis=ax, ascending=ac)
+                        df_scaled = df_scaled.loc[df_meta_rows.index]
+                    else:
+                        print(by)
+                        print(df_meta_columns)
+                        print(df_scaled)
+                        df_meta_columns = df_meta_columns.sort_values(by=by, axis=0, ascending=ac)
+                        df_scaled = df_scaled[df_meta_columns.index]
 
             return {
                 "df": df_scaled,
                 "rows": df_scaled.index.values,
                 "columns": df_scaled.columns.values,
-                "df_full": df_full,
+                "df_meta_columns": df_meta_columns,
+                "df_meta_rows": df_meta_rows,
             }
 
         deps.append(ppg.FunctionInvariant(new_name + "_sort", __scale))
         return ML(
             new_name,
             __scale,
-            self.columns,
-            self.rows,
-            self.index_column,
-            deps,
-            self.annotators,
-            self,
+            index_column = self.index_column,
+            dependencies = deps,
+            annotators = self.annotators,
+            predecessor_objects = self.predecessor_objects,
         )
 
-    def transform(self, *transformations, axis=1):
-        """Transforms the dataframe"""
+    def __interpret_transformations_and_dependencies(self, *transformations, **kwargs):
         new_name = self.name
         deps = []
         transforms = []
@@ -644,47 +567,70 @@ class ML(object):
         deps.extend(
             self.get_dependencies()
             + [self.load()]
-            + [ppg.ParameterInvariant(f"{new_name}_PI_axis", [axis])]
+            + [ppg.ParameterInvariant(f"{new_name}_PI_kwargs", list(kwargs))]
         )
+        return new_name, transforms, deps
+
+    def transform(self, *transformations, **kwargs):
+        """Transforms the dataframe"""
+        axis=kwargs.get("axis", 1)
+        meta_rows = kwargs.get("meta_rows", False)
+        meta_columns = kwargs.get("meta_rows", False)
+        new_name = self.name
+        new_name, transforms, deps = self.__interpret_transformations_and_dependencies(*transformations, **kwargs)
+        def get_transformation_callable(ttype, axis, transformation):
+            if ttype == 0: #callable
+                if axis == 0:
+                    def transformation_call(df):
+                        return df.apply(transformation, axis=0)
+                    return transformation_call
+                else:
+                    def transformation_call(df):
+                        return df.transpose().apply(transformation, axis=0).transpose()
+            if ttype == 1: #pandas method
+                def transformation_call(df):
+                    func = getattr(df, transformation)
+                    return func()
+            if ttype == 2: #list of pandas methods
+                def transformation_call(df):
+                    func = getattr(df, transformation[0])
+                    return func(*transformation[1], **transformation[2])
+            return transformation_call
 
         def __scale():
-            df_scaled = self.df
+            df_scaled = self.df.copy()
+            df_meta_rows = self.df_meta_rows.copy()
+            df_meta_columns = self.df_meta_columns.copy()
             for ttype, transformation in transforms:
-                if ttype == 0: #callable
-                    if axis == 0:
-                        df_scaled = df_scaled.apply(transformation, axis=0)
-                    else:
-                        df_scaled = (
-                                df_scaled.transpose()
-                                .apply(transformation, axis=0)
-                                .transpose()
-                            )
-                if ttype == 1: #pandas method
-                    func = getattr(df_scaled, transformation)
-                    df_scaled = func()
+                transformation_callable = get_transformation_callable(ttype, axis, transformation)
+                df_scaled = transformation_callable(df_scaled)
+                #sometimes you might want to apply the transformation to the meta dfs as well .. rename comes to mind
+                if meta_columns: 
+                    df_meta_columns = transformation_callable(df_meta_columns)
+                if meta_rows:
+                    df_meta_rows = transformation_callable(df_meta_rows)
+            #if the index has changed, the meta dfs loose there 1 to 1 mapping, so discard them
+            if not df_scaled.index.equals(df_meta_rows.index):
+                df_meta_rows = pd.DataFrame({}, index = df_scaled.index)
+            if not df_scaled.columns.equals(df_meta_columns.index):
+                df_meta_columns = pd.DataFrame({}, index = df_scaled.columns)
 
-                if ttype == 2: #list of pandas methods
-                    func = getattr(df_scaled, transformation[0])
-                    df_scaled = func(*transformation[1], **transformation[2])
-            df_full = self.df_full.copy()
-            df_full.update(df_scaled)
             return {
                 "df": df_scaled,
                 "rows": df_scaled.index.values,
                 "columns": df_scaled.columns.values,
-                "df_full": df_full,
+                "df_meta_rows": df_meta_rows,
+                "df_meta_columns": df_meta_columns,
             }
 
         deps.append(ppg.FunctionInvariant(new_name + "_func", __scale))
         return ML(
             new_name,
             __scale,
-            self.columns,
-            self.rows,
-            self.index_column,
-            deps,
-            self.annotators,
-            self,
+            index_column = self.index_column,
+            dependencies = deps,
+            annotators = self.annotators,
+            predecessor_objects = self.predecessor_objects
         )
 
     def impute(self, *transformations, axis=1):
@@ -710,7 +656,7 @@ class ML(object):
         """
         strategy = clustering_strategy
         if clustering_strategy is None:
-            strategy = strategies.NewKMeans("KNN", 2)
+            strategy = strategies.NewKMeans(f"KNN_{axis}", 2)
         new_name = "{}_Cl({})_axis_{}".format(self.name, strategy.name, axis)
         deps = self.dependencies + [
             self.load(),
@@ -725,94 +671,40 @@ class ML(object):
                 raise ValueError(
                     "Please supply a valid clustering strategy. Needs to be an instance of {}"
                 )
-            df = self.df
+            df = self.df.copy()
+            df_meta_columns = self.df_meta_columns.copy()
+            df_meta_rows = self.df_meta_rows.copy()
             if axis == 0:
                 df = df.transpose()
             strategy.fit(df, **fit_parameter)
-            df_full = self.df_full
-            columns = self.columns
-            rows = self.rows
             if axis == 0:
-                df_full = df_full.append(strategy.clusters.transpose())
-                df_full.loc[strategy.name] = df_full.loc[strategy.name].fillna(-1)
+                #cluster columns
+                df_meta_columns = df_meta_columns.join(strategy.clusters)
+                df_meta_columns[strategy.name] = df_meta_columns[strategy.name].fillna(-1)
                 df = df.transpose()
             else:
-                df_full = df_full.join(strategy.clusters)
-                df_full[strategy.name] = df_full[strategy.name].fillna(-1)
+                #cluster rows
+                df_meta_rows = df_meta_rows.join(strategy.clusters)
+                df_meta_rows[strategy.name] = df_meta_rows[strategy.name].fillna(-1)
+            self.predecessor_objects[strategy.name] = strategy
             return {
-                strategy.name: strategy,
-                "df_full": df_full,
-                "df": df,
+                "df": self.df.copy(),
                 "columns": df.columns.values,
                 "rows": df.index.values,
+                "df_meta_rows": df_meta_rows,
+                "df_meta_columns": df_meta_columns,
             }
 
         deps.append(ppg.FunctionInvariant(new_name + "_do_Cluster", __do_cluster))
         return ML(
             new_name,
             __do_cluster,
-            self.columns,
-            self.rows,
-            self.index_column,
-            deps,
-            self.annotators,
-            self,
+            index_column = self.index_column,
+            dependencies = deps,
+            annotators = self.annotators,
+            predecessor_objects = self.predecessor_objects
         )
 
-    def cluster(self, clustering_strategy=None, axis=1, **fit_parameter):
-        """
-        This defines the clustering model, fits the data and adds the trained model as attribute to self.
-        """
-        strategy = clustering_strategy
-        if clustering_strategy is None:
-            strategy = strategies.NewKMeans("KNN", 2)
-        new_name = "{}_Cl({})_axis_{}".format(self.name, strategy.name, axis)
-        deps = self.dependencies + [
-            self.load(),
-            ppg.ParameterInvariant(
-                new_name + "_params", [axis, fit_parameter] + strategy.invariants
-            ),
-            ppg.FunctionInvariant(new_name + "_func", strategy.fit),
-        ]
-
-        def __do_cluster():
-            if not isinstance(strategy, strategies.ClusteringMethod):
-                raise ValueError(
-                    "Please supply a valid clustering strategy. Needs to be an instance of {}"
-                )
-            df = self.df
-            if axis == 0:
-                df = df.transpose()
-            strategy.fit(df, **fit_parameter)
-            df_full = self.df_full
-            columns = self.columns
-            rows = self.rows
-            if axis == 0:
-                df_full = df_full.append(strategy.clusters.transpose())
-                df_full.loc[strategy.name] = df_full.loc[strategy.name].fillna(-1)
-                df = df.transpose()
-            else:
-                df_full = df_full.join(strategy.clusters)
-                df_full[strategy.name] = df_full[strategy.name].fillna(-1)
-            return {
-                strategy.name: strategy,
-                "df_full": df_full,
-                "df": df,
-                "columns": df.columns.values,
-                "rows": df.index.values,
-            }
-
-        deps.append(ppg.FunctionInvariant(new_name + "_do_Cluster", __do_cluster))
-        return ML(
-            new_name,
-            __do_cluster,
-            self.columns,
-            self.rows,
-            self.index_column,
-            deps,
-            self.annotators,
-            self,
-        )
 
     def reduce(self, dimensionality_reduction=None, axis=1, name = None, **fit_parameter):
         """
@@ -839,13 +731,12 @@ class ML(object):
                 raise ValueError(
                     "Please supply a valid clustering strategy. Needs to be an instance of {}"
                 )
-            df = self.df
-            df_full = self.df_full
+            df = self.df.copy()
+            df_meta_rows = self.df_meta_rows.copy()
+            df_meta_columns = self.df_meta_columns.copy()
             if axis == 1:
                 df = df.transpose()
-                df_full = df_full.transpose()
             strategy.fit(df, **fit_parameter)
-            df_full = self.df_full
             columns = self.columns
             rows = self.rows
             ret = {}
@@ -853,58 +744,51 @@ class ML(object):
                 #columns are data points ...
                 new_df = pd.DataFrame(strategy.reduced_matrix.transpose(), index = new_index, columns = df.index)
                 df = new_df.transpose()
-                df_full = df #makes no sense to preserve the other columns
+                df_meta_rows = pd.DataFrame({}, index = df.index)
             else:
                 #rows are data points
-                df_new = pd.DataFrame(strategy.reduced_matrix, index = df.index, columns = new_index)
-                df_full = df_full.join(new_df)
-                df = df_new
+                df = pd.DataFrame(strategy.reduced_matrix, index = df.index, columns = new_index)
+                df_meta_columns = pd.DataFrame({}, index = df.index.columns)
             rows = df.index.values
             columns = df.columns.values
+            self.predecessor_objects[strategy.name] = strategy
             return {
-                strategy.name: strategy,
-                "df_full": df_full,
                 "df": df,
                 "columns": columns,
-                "rows": rows
+                "rows": rows,
+                "df_meta_rows": df_meta_rows,
+                "df_meta_columns": df_meta_columns,
             }
     
         deps.append(ppg.FunctionInvariant(new_name + "__do_reducefunc", __do_reduce))
-        if axis == 1:
-            row_f = self.col_f
-            col_f = None
-        else:
-            row_f = None
-            col_f = self.row_f
+
         return ML(
             new_name,
             __do_reduce,
-            self.columns,
-            self.rows,
-            self.index_column,
-            deps,
-            self.annotators,
-            row_labels = row_f,
-            column_labels = col_f,
+            index_column = self.index_column,
+            depencdencies = deps,
+            annotators = self.annotators,
+            predecessor_objects = self.predecessor_objects,
             result_dir = new_resdir
             )
         
     
-    def write(self, index=False, row_nice=False, column_nice=False):
+    def write(self, index=False):
         outfile = self.result_dir / (self.name + ".tsv")
         self.result_dir.mkdir(parents=True, exist_ok=True)
 
         def __write():
-            self.df_full.to_csv(str(outfile), sep="\t", index=True)
+            self.df.to_csv(str(outfile), sep="\t", index=True)
 
         return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
-    def write_df(self):
-        outfile = self.result_dir / (self.name + "_data.tsv")
+    def write_full(self):
+        outfile = self.result_dir / (self.name + "_full.tsv")
         self.result_dir.mkdir(parents=True, exist_ok=True)
 
         def __write():
-            self.df.to_csv(str(outfile), sep="\t", index=True)
+            df = self.df.transpose().join(self.df_meta_columns).transpose().join(self.df_meta_rows)
+            df.to_csv(str(outfile), sep="\t", index=True)
 
         return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
@@ -922,21 +806,14 @@ class ML(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
-
+        
         def __plot():
-            df = self.__labels_nice()
+            df = self.df
             figure = plots.generate_heatmap_simple_figure(
                 df, title, show_column_label=show_column_label, **params
             )
             figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
-
-        row_s = self.row_f
-        col_s = self.col_f
-        if callable(row_s):
-            row_s = row_s.__name__
-        if callable(col_s):
-            col_s = col_s.__name__
 
         params_job = ppg.ParameterInvariant(
             outfile.name + "_label_nice", list(params) + [title, show_column_label]
@@ -966,9 +843,8 @@ class ML(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
-
         def __plot():
-            df = self.__labels_nice()
+            df = self.df
             figure = plots.generate_heatmap_figure(
                 df,
                 title,
@@ -985,13 +861,6 @@ class ML(object):
             figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
-        row_s = self.row_f
-        col_s = self.col_f
-        if callable(row_s):
-            row_s = row_s.__name__
-        if callable(col_s):
-            col_s = col_s.__name__
-
         params_job = ppg.ParameterInvariant(
             outfile.name + "_label_nice",
             list(params)
@@ -1002,8 +871,6 @@ class ML(object):
                 legend_location,
                 show_column_label,
                 show_row_label,
-                row_s,
-                col_s,
             ],
         )
 
@@ -1037,7 +904,7 @@ class ML(object):
         def __plot():
             dpi = params.get("dpi", 300)
             rows_per_inch = params.get("rows_per_inch", 6)
-            df = self.__labels_nice()
+            df = self.df
             len_y = len(df)
             max_inches_to_plot = 60000 / (2 * dpi)
 
@@ -1062,12 +929,6 @@ class ML(object):
             pdf.close()
             df.to_csv(str(outf) + ".tsv", index=False, sep="\t")
 
-        row_s = self.row_f
-        col_s = self.col_f
-        if callable(row_s):
-            row_s = row_s.__name__
-        if callable(col_s):
-            col_s = col_s.__name__
         params_job = ppg.ParameterInvariant(
             outf.name + "_label_nice",
             list(params)
@@ -1078,8 +939,6 @@ class ML(object):
                 legend_location,
                 show_column_label,
                 show_row_label,
-                row_s,
-                col_s,
             ],
         )
         return (
@@ -1106,12 +965,12 @@ class ML(object):
         outfile.parent.mkdir(parents=True, exist_ok=True)
         row_labels = params.get('label_dict', None)
         def __plot():
-            df = self.__labels_nice()
+            df = self.df
             if class_label_column is not None:
-                if not class_label_column in self.df_full.columns:
-                    raise ValueError(f"No class label column {class_label_column} in df_full.")
+                if not class_label_column in self.df_meta_rows.columns:
+                    raise ValueError(f"No class label column {class_label_column} in df_meta_rows.")
                 else:
-                    df[class_label_column] = self.df_full[class_label_column].values
+                    df[class_label_column] = self.df_meta_rows[class_label_column].values
             if row_labels is not None:
                 tmp = []
                 for i in df.index:
@@ -1133,13 +992,6 @@ class ML(object):
                 ) 
             figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
-
-        row_s = self.row_f
-        col_s = self.col_f
-        if callable(row_s):
-            row_s = row_s.__name__
-        if callable(col_s):
-            col_s = col_s.__name__
 
         params_job = ppg.ParameterInvariant(
             outfile.name + "_2d",
