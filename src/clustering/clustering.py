@@ -188,8 +188,8 @@ class ML(object):
         self.cache_dir = Path("cache") / "ML" / self.name
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.predecessor_objects = predecessor_objects
-        result_dir = kwargs.get("result_dir", None)
-        if result_dir is None:
+        self.result_dir = kwargs.get("result_dir", None)
+        if self.result_dir is None:
             if hasattr(genes_or_df_or_loading_function, "result_dir"):
                 self.result_dir = genes_or_df_or_loading_function.result_dir / self.name
                 if "row_labels" not in kwargs:
@@ -239,7 +239,7 @@ class ML(object):
                     list(kwargs),
                 )
         )
-
+        
     def __register_attribute():
         pass
 
@@ -291,7 +291,6 @@ class ML(object):
                 self.columns = df.columns.values
             if self.rows is None:
                 self.rows = df.index.values
-            print(self.name)
             additional_columns = [column for column in df.columns.values if column not in self.columns]
             additional_rows = [row for row in df.index.values if row not in self.rows]
             df_meta_rows = df.copy()
@@ -308,6 +307,10 @@ class ML(object):
             dictionary_with_attributes["df_meta_columns"] = df_meta_columns
             df = df[self.columns]
             df = df.loc[self.rows]
+            if not isinstance(df, pd.DataFrame):
+                print(df)
+                print(self.name)
+                raise ValueError("Load function did not set a Dataframe.")
             dictionary_with_attributes["df"] = df
             assert df_meta_rows.index.equals(df.index)
             assert df_meta_columns.index.equals(df.columns)
@@ -346,7 +349,7 @@ class ML(object):
         for sorting in sorting_transformations:
             if callable(sorting):
                 # supply a sorting function that takes a dataframe
-                sorts.append(sorting)
+                sorts.append([sorting, by, axis, ac])
                 new_name = f"{new_name}_sort({sorting.__name__.replace('>', '').replace('<', '')})"
             elif isinstance(sorting, str):
                 # row name or column name to sort by
@@ -423,7 +426,9 @@ class ML(object):
             df_meta_columns = self.df_meta_columns.copy()
             df_meta_rows = self.df_meta_rows.copy()
             for sorting, by, ax, ac in sorts:
-                if by in df_scaled.columns:
+                if callable(sorting):
+                    df_scaled = sorting(df_scaled)
+                elif by in df_scaled.columns:
                     df_scaled = df_scaled.sort_values(by=by, axis=ax, ascending=ac)
                     if ax == 0:
                         df_meta_rows = df_meta_rows.loc[df_scaled.index]
@@ -584,9 +589,12 @@ class ML(object):
                     def transformation_call(df):
                         return df.apply(transformation, axis=0)
                     return transformation_call
-                else:
+                elif axis == 1:
                     def transformation_call(df):
                         return df.transpose().apply(transformation, axis=0).transpose()
+                else:
+                    def transformation_call(df):
+                        return transformation(df)
             if ttype == 1: #pandas method
                 def transformation_call(df):
                     func = getattr(df, transformation)
@@ -614,7 +622,9 @@ class ML(object):
                 df_meta_rows = pd.DataFrame({}, index = df_scaled.index)
             if not df_scaled.columns.equals(df_meta_columns.index):
                 df_meta_columns = pd.DataFrame({}, index = df_scaled.columns)
-
+            assert isinstance(df_scaled, pd.DataFrame)
+            assert isinstance(df_meta_rows, pd.DataFrame)
+            assert isinstance(df_meta_columns, pd.DataFrame)
             return {
                 "df": df_scaled,
                 "rows": df_scaled.index.values,
@@ -630,7 +640,7 @@ class ML(object):
             index_column = self.index_column,
             dependencies = deps,
             annotators = self.annotators,
-            predecessor_objects = self.predecessor_objects
+            predecessor_objects = self.predecessor_objects,
         )
 
     def impute(self, *transformations, axis=1):
@@ -688,7 +698,7 @@ class ML(object):
                 df_meta_rows[strategy.name] = df_meta_rows[strategy.name].fillna(-1)
             self.predecessor_objects[strategy.name] = strategy
             return {
-                "df": self.df.copy(),
+                "df": self.df,
                 "columns": df.columns.values,
                 "rows": df.index.values,
                 "df_meta_rows": df_meta_rows,
@@ -761,22 +771,26 @@ class ML(object):
             }
     
         deps.append(ppg.FunctionInvariant(new_name + "__do_reducefunc", __do_reduce))
-
         return ML(
             new_name,
             __do_reduce,
             index_column = self.index_column,
-            depencdencies = deps,
+            dependencies = deps,
             annotators = self.annotators,
             predecessor_objects = self.predecessor_objects,
             result_dir = new_resdir
             )
         
     
-    def write(self, index=False):
-        outfile = self.result_dir / (self.name + ".tsv")
-        self.result_dir.mkdir(parents=True, exist_ok=True)
-
+    def write(self, filename = None, index=False):
+        if filename is None:
+            outdir = self.result_dir
+            outfile = self.result_dir / (self.name + ".tsv")
+            self.result_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            outfile = filename
+            outdir = filename.parent
+            outdir.mkdir(parents=True, exist_ok=True)
         def __write():
             self.df.to_csv(str(outfile), sep="\t", index=True)
 
@@ -788,6 +802,8 @@ class ML(object):
 
         def __write():
             df = self.df.transpose().join(self.df_meta_columns).transpose().join(self.df_meta_rows)
+            print(df)
+            raise ValueError()
             df.to_csv(str(outfile), sep="\t", index=True)
 
         return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
@@ -957,7 +973,6 @@ class ML(object):
         **params,
     ):
         dependencies.append(self.load())
-        dependencies.append(self.predecessor.load())
         if outfile is None:
             outfile = Path(self.result_dir) / f"{self.name}_2d.png"
         elif isinstance(outfile, str):
@@ -978,9 +993,6 @@ class ML(object):
                 df['labels'] = tmp
             xlabel = ""
             ylabel = ""
-            if hasattr(self.predecessor, 'PCA'):
-                xlabel = f" explained variance = {self.predecessor.PCA.explained_variance_ratio[0]*100:.2f}%"
-                ylabel = f" explained variance = {self.predecessor.PCA.explained_variance_ratio[1]*100:.2f}%"
             figure = plots.generate_dr_plot(
                 df,
                 title,

@@ -201,7 +201,7 @@ class ClassLabel(ClusteringMethod):
     def fit(self, df, **fit_parameter):
         try:
             cluster_ids = [self.__class_label_dict[key] for key in df.index.values]
-        except KeyError():
+        except KeyError:
             print("Keys : ", self.__class_label_dict.keys())
             raise
         index = df.index.values
@@ -301,39 +301,35 @@ class SKlearnAgglomerative(ClusteringMethod):
         @param cluster columns should we cluster columns?
         @params cluster_rows should we cluster rows?
         """
-        self.name = name
-        self.no_of_clusters = no_of_clusters
-        self.affinity = affinity
-        self.linkage = linkage
-        self.connectivity = connectivity
-        self.compute_full_tree = compute_full_tree
-        self.memory = memory
-        ClusteringMethod.__init__(self, name)
-        self.clustering = sklearn.cluster.AgglomerativeClustering(
-            n_clusters=self.no_of_clusters,
-            affinity=self.affinity,
-            memory=self.memory,
-            connectivity=self.connectivity,
-            compute_full_tree=self.compute_full_tree,
-            linkage=self.linkage,
-        )
-        self.clustering.predict = self.clustering.fit_predict
-
-    def get_dependencies(self):
-        return [
-            ppg.ParameterInvariant(
-                self.name + "parameters",
-                [
-                    self.no_of_clusters,
-                    self.affinity,
-                    self.linkage,
-                    self.connectivity,
-                    self.compute_full_tree,
-                    self.memory,
-                ],
-            )
+        self.__no_of_clusters = no_of_clusters
+        self.__affinity = affinity
+        self.__linkage = linkage
+        self.__connectivity = connectivity
+        self.__compute_full_tree = compute_full_tree
+        self.__memory = memory
+        invariants = [
+            self.__no_of_clusters,
+            self.__affinity,
+            self.__linkage,
+            self.__connectivity,
+            self.__compute_full_tree,
+            self.__memory,
         ]
+        super().__init__(name, invariants)
+        self.__clustering = sklearn.cluster.AgglomerativeClustering(
+            n_clusters=self.__no_of_clusters,
+            affinity=self.__affinity,
+            memory=self.__memory,
+            connectivity=self.__connectivity,
+            compute_full_tree=self.__compute_full_tree,
+            linkage=self.__linkage,
+        )
 
+    @property
+    def clustering(self):
+        return self.__clustering
+
+'''
     def new_fit_function(self):
         """
         This is intended to replace the original  sklearn fit function of the clustering,
@@ -357,19 +353,19 @@ class SKlearnAgglomerative(ClusteringMethod):
             )
             memory = sklearn.cluster.hierarchical.check_memory(self.memory)
 
-            if self.n_clusters <= 0:
+            if self.__n_clusters <= 0:
                 raise ValueError(
                     "n_clusters should be an integer greater than 0."
-                    " %s was provided." % str(self.n_clusters)
+                    " %s was provided." % str(self.__n_clusters)
                 )
 
-            if self.linkage == "ward" and self.affinity != "euclidean":
+            if self.__linkage == "ward" and self.__affinity != "euclidean":
                 raise ValueError(
                     "%s was provided as affinity. Ward can only "
                     "work with euclidean distances." % (self.affinity,)
                 )
 
-            if self.linkage not in sklearn.cluster.hierarchical._TREE_BUILDERS:
+            if self.__linkage not in sklearn.cluster.hierarchical._TREE_BUILDERS:
                 raise ValueError(
                     "Unknown linkage type %s. "
                     "Valid options are %s"
@@ -377,41 +373,41 @@ class SKlearnAgglomerative(ClusteringMethod):
                 )
             tree_builder = sklearn.cluster.hierarchical._TREE_BUILDERS[self.linkage]
 
-            connectivity = self.connectivity
-            if self.connectivity is not None:
+            connectivity = self.__connectivity
+            if self.__connectivity is not None:
                 if callable(self.connectivity):
-                    connectivity = self.connectivity(X)
+                    connectivity = self.__connectivity(X)
                 connectivity = check_array(
                     connectivity, accept_sparse=["csr", "coo", "lil"]
                 )
 
             n_samples = len(X)
-            compute_full_tree = self.compute_full_tree
-            if self.connectivity is None:
+            compute_full_tree = self.__compute_full_tree
+            if self.__connectivity is None:
                 compute_full_tree = True
             if compute_full_tree == "auto":
                 # Early stopping is likely to give a speed up only for
                 # a large number of clusters. The actual threshold
                 # implemented here is heuristic
-                compute_full_tree = self.n_clusters < max(100, 0.02 * n_samples)
-            n_clusters = self.n_clusters
+                compute_full_tree = self.__n_clusters < max(100, 0.02 * n_samples)
+            n_clusters = self.__n_clusters
             if compute_full_tree:
                 n_clusters = None
 
             # Construct the tree
             kwargs = {"return_distance": True}
-            if self.linkage != "ward":
-                kwargs["linkage"] = self.linkage
-                kwargs["affinity"] = self.affinity
-            self.children_, self.n_components_, self.n_leaves_, parents, self.distances = memory.cache(
+            if self.__linkage != "ward":
+                kwargs["linkage"] = self.__linkage
+                kwargs["affinity"] = self.__affinity
+            self.__children_, self.__n_components_, self.__n_leaves_, parents, self.__distances = memory.cache(
                 tree_builder
             )(
                 X, connectivity, n_clusters=n_clusters, **kwargs
             )
             # Cut the tree
             if compute_full_tree:
-                self.labels_ = sklearn.cluster.hierarchical._hc_cut(
-                    self.n_clusters, self.children_, self.n_leaves_
+                self.__labels_ = sklearn.cluster.hierarchical._hc_cut(
+                    self.__n_clusters, self.__children_, self.__n_leaves_
                 )
             else:
                 labels = sklearn.cluster.hierarchical._hierarchical.hc_get_heads(
@@ -420,7 +416,7 @@ class SKlearnAgglomerative(ClusteringMethod):
                 # copy to avoid holding a reference on the original array
                 labels = np.copy(labels[:n_samples])
                 # Reassign cluster numbers
-                self.labels_ = np.searchsorted(np.unique(labels), labels)
+                self.__labels_ = np.searchsorted(np.unique(labels), labels)
             return self
 
         return my_fit
@@ -444,7 +440,7 @@ class SKlearnAgglomerative(ClusteringMethod):
             observations[number_of_observations + ii] = o
             ret.append([x[0], x[1], distance, o])
         return np.array(ret, dtype=float)
-
+'''
 
 class ScipyAgglomerative(ClusteringMethod):
     def __init__(
