@@ -29,6 +29,7 @@ from . import plots
 from . import strategies
 import functools
 import collections
+from inspect import signature
 
 
 def equality_of_function(func1, func2):
@@ -185,7 +186,10 @@ class ML(object):
         self.index_column = index_column
         self.dependencies = dependencies
         self.annotators = annotators
-        self.cache_dir = Path("cache") / "ML" / self.name
+        self.cache_name = self.name
+        if len(name) > 250:
+            self.cache_name = str(hash(self.name))
+        self.cache_dir = Path("cache") / "ML" / self.cache_name
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.predecessor_objects = predecessor_objects
         self.result_dir = kwargs.get("result_dir", None)
@@ -219,7 +223,7 @@ class ML(object):
                     self.name + "_df_or_gene_or_loading_function",
                     [
                         self.df_or_gene_or_loading_function.columns,
-                        self.df_or_gene_or_loading_function.as_matrix(),
+                        self.df_or_gene_or_loading_function.values,
                         self.df_or_gene_or_loading_function.index,
                     ],
                 )
@@ -234,12 +238,9 @@ class ML(object):
         self.row_labels = kwargs.get("row_labels", None)
         self.column_labels = kwargs.get("column_labels", None)
         self.dependencies.append(
-            ppg.ParameterInvariant(
-                self.name + "_kwargs",
-                    list(kwargs),
-                )
+            ppg.ParameterInvariant(self.name + "_kwargs", list(kwargs),)
         )
-        
+
     def __register_attribute():
         pass
 
@@ -249,6 +250,7 @@ class ML(object):
     def __getattr__(self, name):
         def method(*args):
             return self.transform(name, *args)
+
         return method
 
     def load(self):
@@ -291,18 +293,24 @@ class ML(object):
                 self.columns = df.columns.values
             if self.rows is None:
                 self.rows = df.index.values
-            additional_columns = [column for column in df.columns.values if column not in self.columns]
+            additional_columns = [
+                column for column in df.columns.values if column not in self.columns
+            ]
             additional_rows = [row for row in df.index.values if row not in self.rows]
             df_meta_rows = df.copy()
             df_meta_rows = df_meta_rows[additional_columns]
             if "df_meta_rows" in dictionary_with_attributes:
-                df_meta_rows = df_meta_rows.join(dictionary_with_attributes["df_meta_rows"])
+                df_meta_rows = df_meta_rows.join(
+                    dictionary_with_attributes["df_meta_rows"]
+                )
             df_meta_rows = df_meta_rows.loc[self.rows]
             dictionary_with_attributes["df_meta_rows"] = df_meta_rows
             df_meta_columns = df.copy().transpose()
             df_meta_columns = df_meta_columns[additional_rows]
             if "df_meta_columns" in dictionary_with_attributes:
-                df_meta_columns = df_meta_columns.join(dictionary_with_attributes["df_meta_columns"])    
+                df_meta_columns = df_meta_columns.join(
+                    dictionary_with_attributes["df_meta_columns"]
+                )
             df_meta_columns = df_meta_columns.loc[self.columns]
             dictionary_with_attributes["df_meta_columns"] = df_meta_columns
             df = df[self.columns]
@@ -319,12 +327,13 @@ class ML(object):
         def __load(dictionary_with_attributes):
             for attr_name in dictionary_with_attributes:
                 setattr(self, attr_name, dictionary_with_attributes[attr_name])
+
         return (
             ppg.CachedDataLoadingJob(
-                os.path.join(self.cache_dir, self.name + "_load"), __calc, __load
+                os.path.join(self.cache_dir, self.cache_name + "_load"), __calc, __load
             )
             .depends_on(self.dependencies)
-            .depends_on(ppg.FunctionInvariant(self.name + "_load_calc", __calc))
+            .depends_on(ppg.FunctionInvariant(self.cache_name + "_load_calc", __calc))
         )
 
     def sort(self, *sorting_transformations, axis=0):
@@ -349,6 +358,12 @@ class ML(object):
         for sorting in sorting_transformations:
             if callable(sorting):
                 # supply a sorting function that takes a dataframe
+                deps.append(
+                    ppg.FunctionInvariant(
+                        f"{new_name}_{sorting.__name__.replace('>', '').replace('<', '')}",
+                        sorting,
+                    )
+                )
                 sorts.append([sorting, by, axis, ac])
                 new_name = f"{new_name}_sort({sorting.__name__.replace('>', '').replace('<', '')})"
             elif isinstance(sorting, str):
@@ -408,14 +423,7 @@ class ML(object):
             new_name = f"{new_name}_sort({by}_{ax}_{ac})"
 
         for sort in sorts:
-            if callable(sort):
-                deps.append(
-                    ppg.FunctionInvariant(
-                        f"{new_name}_{sort.__name__.replace('>', '').replace('<', '')}",
-                        sort,
-                    )
-                )
-            elif isinstance(sort, list):
+            if isinstance(sort, list):
                 deps.append(
                     ppg.ParameterInvariant(f"{new_name}_PI{str(sort[1])}", sort[1:])
                 )
@@ -425,28 +433,65 @@ class ML(object):
             df_scaled = self.df.copy()
             df_meta_columns = self.df_meta_columns.copy()
             df_meta_rows = self.df_meta_rows.copy()
+
             for sorting, by, ax, ac in sorts:
                 if callable(sorting):
                     df_scaled = sorting(df_scaled)
-                elif by in df_scaled.columns:
-                    df_scaled = df_scaled.sort_values(by=by, axis=ax, ascending=ac)
+                elif sorting == "sort_values":
+                    if isinstance(by, str):
+                        by = [by]
+                    elif isinstance(by, list):
+                        if not all([isinstance(b, str) for b in by]):
+                            raise ValueError(
+                                f"Value to sort by must be either str or list of str but contained {[type(b) for b in by]}"
+                            )
+                    else:
+                        raise ValueError(
+                            f"Value to sort by must be either str or list of str, was {type(by)}"
+                        )
                     if ax == 0:
+                        tmp_cols = []
+                        for col in by:
+                            if col not in df_scaled:
+                                try:
+                                    df_scaled[col] = df_meta_rows[col]
+                                    tmp_cols.append(col)
+                                except KeyError:
+                                    if col in df_meta_columns.columns:
+                                        raise KeyError(
+                                            "You are trying to sort rows by a row name : {col}"
+                                        )
+                                    else:
+                                        raise KeyError("Unknown column : {col}")
+                        assert df_scaled.index.equals(df_meta_rows.index)
+                        df_scaled = df_scaled.sort_values(by=by, axis=ax, ascending=ac)
                         df_meta_rows = df_meta_rows.loc[df_scaled.index]
+                        for col in tmp_cols:
+                            df_scaled = df_scaled.drop(col, axis=1)
+                    elif ax == 1:
+                        tmp_cols = []
+                        for col in by:
+                            if col not in df_scaled.index:
+                                try:
+                                    df_scaled.loc[col] = df_meta_columns[col]
+                                    tmp_cols.append(col)
+                                except KeyError:
+                                    if col in df_meta_rows.columns:
+                                        raise KeyError(
+                                            "You are trying to sort columns by a column name : {col}"
+                                        )
+                                    else:
+                                        raise KeyError("Unknown row : {col}")
+
+                        assert df_scaled.columns.equals(df_meta_columns.index)
+                        df_scaled = df_scaled.sort_values(by=by, axis=ax, ascending=ac)
+                        print(df_scaled.columns)
+                        print(df_meta_columns.index)
+                        df_meta_columns = df_meta_columns.loc[df_scaled.columns]
+                        for col in tmp_cols:
+                            df_scaled = df_scaled.drop(col, axis=0)
                     else:
-                        df_meta_columns = df_meta_columns[df_scaled.columns]
-                else:
-                    if ax == 0: 
-                        print(by)
-                        print(df_meta_rows)
-                        print(df_scaled)
-                        df_meta_rows = df_meta_rows.sort_values(by=by, axis=ax, ascending=ac)
-                        df_scaled = df_scaled.loc[df_meta_rows.index]
-                    else:
-                        print(by)
-                        print(df_meta_columns)
-                        print(df_scaled)
-                        df_meta_columns = df_meta_columns.sort_values(by=by, axis=0, ascending=ac)
-                        df_scaled = df_scaled[df_meta_columns.index]
+                        raise ValueError(f"No axis to sort: {axis}.")
 
             return {
                 "df": df_scaled,
@@ -460,10 +505,10 @@ class ML(object):
         return ML(
             new_name,
             __scale,
-            index_column = self.index_column,
-            dependencies = deps,
-            annotators = self.annotators,
-            predecessor_objects = self.predecessor_objects,
+            index_column=self.index_column,
+            dependencies=deps,
+            annotators=self.annotators,
+            predecessor_objects=self.predecessor_objects,
         )
 
     def __interpret_transformations_and_dependencies(self, *transformations, **kwargs):
@@ -578,31 +623,112 @@ class ML(object):
 
     def transform(self, *transformations, **kwargs):
         """Transforms the dataframe"""
-        axis=kwargs.get("axis", 1)
-        meta_rows = kwargs.get("meta_rows", False)
-        meta_columns = kwargs.get("meta_rows", False)
+        axis = kwargs.get("axis", None)
+        modify_main = kwargs.get("transform_data", True)
+        modify_meta_rows = kwargs.get("transform_meta_rows", False)
+        modify_meta_columns = kwargs.get("transform_meta_columns", False)
+        modify = [modify_main, modify_meta_rows, modify_meta_columns] 
+        # sometimes you might want to apply the transformation to the meta dfs as well .. rename comes to mind
+
         new_name = self.name
-        new_name, transforms, deps = self.__interpret_transformations_and_dependencies(*transformations, **kwargs)
+        new_name, transforms, deps = self.__interpret_transformations_and_dependencies(
+            *transformations, **kwargs
+        )
+
         def get_transformation_callable(ttype, axis, transformation):
-            if ttype == 0: #callable
+            if ttype == 0:  # callable
                 if axis == 0:
-                    def transformation_call(df):
-                        return df.apply(transformation, axis=0)
-                    return transformation_call
+
+                    def transformation_call(
+                        df,
+                        df_meta_rows,
+                        df_meta_columns,
+                        modify
+                    ):
+                        if modify[0]:
+                            df = df.apply(transformation, axis=0)
+                        if modify[1]:
+                            df_meta_rows = df_meta_rows.apply(transformation, axis=0)
+                        return df, df_meta_rows, df_meta_columns
                 elif axis == 1:
-                    def transformation_call(df):
-                        return df.transpose().apply(transformation, axis=0).transpose()
-                else:
-                    def transformation_call(df):
-                        return transformation(df)
-            if ttype == 1: #pandas method
-                def transformation_call(df):
-                    func = getattr(df, transformation)
-                    return func()
-            if ttype == 2: #list of pandas methods
-                def transformation_call(df):
-                    func = getattr(df, transformation[0])
-                    return func(*transformation[1], **transformation[2])
+
+                    def transformation_call(
+                        df,
+                        df_meta_rows,
+                        df_meta_columns,
+                        modify
+                    ):
+                        if modify[0]:
+                            df = df.transpose().apply(transformation, axis=0).transpose()
+                        if modify[2]:
+                            df_meta_columns = df_meta_columns.apply(transformation, axis=0)
+                        return df, df_meta_rows, df_meta_columns
+
+                else:                        
+                    def transformation_call(
+                        df,
+                        df_meta_rows,
+                        df_meta_columns,
+                        modify
+                        ):
+                        indices = np.array([0, 1, 2])[[modify]]
+                        dfs = [df, df_meta_rows, df_meta_columns]
+                        params = []
+                        sig = signature(transformation)
+                        for param in sig.parameters:
+                            if param in locals():
+                                params.append(locals()[param])
+                            else:
+                                raise ValueError("The parameter {param} of given callable is not in local scope.")
+                        print(transformation)
+                        print(*params)
+                        ret = transformation(*params)
+                        if isinstance(ret, tuple):
+                            ret = list(ret)
+                        else:
+                            ret = [ret]
+                        print(ret)
+                        print(indices)
+                        print(self.name)
+                        print(dfs)
+                        assert len(ret) == len(indices)
+                        for i, index in enumerate(indices):
+                            dfs[index] = ret[i]
+                        print(dfs)
+                        #if self.name == "KNN_NM-WT_vs_NM-GFP_FDR05_LF1_all_Im(nan0)_scale_Cl(KNN_1)_axis_1_Cl(Agglo)_axis_0":
+                        #    raise ValueError()
+                        return dfs[0], dfs[1], dfs[2]
+
+            elif ttype == 1:  # pandas method
+
+                def transformation_call(
+                    df,
+                    df_meta_rows,
+                    df_meta_columns,
+                    modify
+                ):
+                    dfs = [df, df_meta_rows, df_meta_columns]
+                    for i, mod in enumerate(modify):
+                        if mod:
+                            func = getattr(dfs[i], transformation)
+                            dfs[i] = func()
+                    return dfs[0], dfs[1], dfs[2]
+
+            elif ttype == 2:  # list of pandas methods and arguments
+
+                def transformation_call(
+                    df,
+                    df_meta_rows,
+                    df_meta_columns,
+                    modify
+                ):
+                    dfs = [df, df_meta_rows, df_meta_columns]
+                    for i, mod in enumerate(modify):
+                        if mod:
+                            func = getattr(df, transformation[0])
+                            dfs[i] = func(*transformation[1], **transformation[2]) 
+                    return dfs[0], dfs[1], dfs[2]
+
             return transformation_call
 
         def __scale():
@@ -610,21 +736,31 @@ class ML(object):
             df_meta_rows = self.df_meta_rows.copy()
             df_meta_columns = self.df_meta_columns.copy()
             for ttype, transformation in transforms:
-                transformation_callable = get_transformation_callable(ttype, axis, transformation)
-                df_scaled = transformation_callable(df_scaled)
-                #sometimes you might want to apply the transformation to the meta dfs as well .. rename comes to mind
-                if meta_columns: 
-                    df_meta_columns = transformation_callable(df_meta_columns)
-                if meta_rows:
-                    df_meta_rows = transformation_callable(df_meta_rows)
-            #if the index has changed, the meta dfs loose there 1 to 1 mapping, so discard them
+                transformation_callable = get_transformation_callable(
+                    ttype, axis, transformation
+                )
+                df_scaled, df_meta_rows, df_meta_columns = transformation_callable(
+                    df_scaled,
+                    df_meta_rows,
+                    df_meta_columns,
+                    modify
+                )
+
+            # if the index has changed, the meta dfs loose there 1 to 1 mapping, so discard them
             if not df_scaled.index.equals(df_meta_rows.index):
-                df_meta_rows = pd.DataFrame({}, index = df_scaled.index)
+                df_meta_rows = pd.DataFrame({}, index=df_scaled.index)
             if not df_scaled.columns.equals(df_meta_columns.index):
-                df_meta_columns = pd.DataFrame({}, index = df_scaled.columns)
+                df_meta_columns = pd.DataFrame({}, index=df_scaled.columns)
             assert isinstance(df_scaled, pd.DataFrame)
             assert isinstance(df_meta_rows, pd.DataFrame)
             assert isinstance(df_meta_columns, pd.DataFrame)
+            #check for doubles in meta dfs
+            double_column = set(df_scaled.columns).intersection(df_meta_rows.columns)
+            for col in double_column:
+                df_meta_rows = df_meta_rows.drop(col, axis = 1)
+            double_row = set(df_scaled.index).intersection(df_meta_columns.columns)
+            for col in double_row:
+                df_meta_columns = df_meta_columns.drop(col, axis = 0)
             return {
                 "df": df_scaled,
                 "rows": df_scaled.index.values,
@@ -637,11 +773,23 @@ class ML(object):
         return ML(
             new_name,
             __scale,
-            index_column = self.index_column,
-            dependencies = deps,
-            annotators = self.annotators,
-            predecessor_objects = self.predecessor_objects,
+            index_column=self.index_column,
+            dependencies=deps,
+            annotators=self.annotators,
+            predecessor_objects=self.predecessor_objects,
         )
+
+    def add_meta_column(self, *transformations):
+        return self.transform(*transformations, axis=None, transform_data = False, transform_meta_rows = True)
+
+    def add_meta_row(self, *transformations):
+        return self.transform(*transformations, axis=None, transform_data = False, transform_meta_columns = True)
+
+    def add_meta(self, *transformations, axis = 0):
+        if axis == 0:
+            return self.transform(*transformations, axis, transform_data = False, transform_meta_rows = True)
+        else:
+            return self.transform(*transformations, axis, transform_data = False, transform_meta_columns = True)
 
     def impute(self, *transformations, axis=1):
 
@@ -688,12 +836,14 @@ class ML(object):
                 df = df.transpose()
             strategy.fit(df, **fit_parameter)
             if axis == 0:
-                #cluster columns
+                # cluster columns
                 df_meta_columns = df_meta_columns.join(strategy.clusters)
-                df_meta_columns[strategy.name] = df_meta_columns[strategy.name].fillna(-1)
+                df_meta_columns[strategy.name] = df_meta_columns[strategy.name].fillna(
+                    -1
+                )
                 df = df.transpose()
             else:
-                #cluster rows
+                # cluster rows
                 df_meta_rows = df_meta_rows.join(strategy.clusters)
                 df_meta_rows[strategy.name] = df_meta_rows[strategy.name].fillna(-1)
             self.predecessor_objects[strategy.name] = strategy
@@ -709,14 +859,13 @@ class ML(object):
         return ML(
             new_name,
             __do_cluster,
-            index_column = self.index_column,
-            dependencies = deps,
-            annotators = self.annotators,
-            predecessor_objects = self.predecessor_objects
+            index_column=self.index_column,
+            dependencies=deps,
+            annotators=self.annotators,
+            predecessor_objects=self.predecessor_objects,
         )
 
-
-    def reduce(self, dimensionality_reduction=None, axis=1, name = None, **fit_parameter):
+    def reduce(self, dimensionality_reduction=None, axis=1, name=None, **fit_parameter):
         """
         This performas a dimensionality reduction on df and returns a new ML wich now contains the reduced matrix.
         """
@@ -736,6 +885,7 @@ class ML(object):
         ]
         new_index = [f"Dim {i+1}" for i in range(strategy.dimensions)]
         new_resdir = self.result_dir.parent / new_name
+
         def __do_reduce():
             if not isinstance(strategy, strategies.DimensionalityReduction):
                 raise ValueError(
@@ -751,14 +901,20 @@ class ML(object):
             rows = self.rows
             ret = {}
             if axis == 1:
-                #columns are data points ...
-                new_df = pd.DataFrame(strategy.reduced_matrix.transpose(), index = new_index, columns = df.index)
+                # columns are data points ...
+                new_df = pd.DataFrame(
+                    strategy.reduced_matrix.transpose(),
+                    index=new_index,
+                    columns=df.index,
+                )
                 df = new_df.transpose()
-                df_meta_rows = pd.DataFrame({}, index = df.index)
+                df_meta_rows = pd.DataFrame({}, index=df.index)
             else:
-                #rows are data points
-                df = pd.DataFrame(strategy.reduced_matrix, index = df.index, columns = new_index)
-                df_meta_columns = pd.DataFrame({}, index = df.index.columns)
+                # rows are data points
+                df = pd.DataFrame(
+                    strategy.reduced_matrix, index=df.index, columns=new_index
+                )
+                df_meta_columns = pd.DataFrame({}, index=df.index.columns)
             rows = df.index.values
             columns = df.columns.values
             self.predecessor_objects[strategy.name] = strategy
@@ -769,30 +925,65 @@ class ML(object):
                 "df_meta_rows": df_meta_rows,
                 "df_meta_columns": df_meta_columns,
             }
-    
+
         deps.append(ppg.FunctionInvariant(new_name + "__do_reducefunc", __do_reduce))
         return ML(
             new_name,
             __do_reduce,
-            index_column = self.index_column,
-            dependencies = deps,
-            annotators = self.annotators,
-            predecessor_objects = self.predecessor_objects,
-            result_dir = new_resdir
-            )
-        
-    
-    def write(self, filename = None, index=False):
+            index_column=self.index_column,
+            dependencies=deps,
+            annotators=self.annotators,
+            predecessor_objects=self.predecessor_objects,
+            result_dir=new_resdir,
+        )
+
+    def write(self, filename=None, index=False, full=False):
         if filename is None:
             outdir = self.result_dir
             outfile = self.result_dir / (self.name + ".tsv")
             self.result_dir.mkdir(parents=True, exist_ok=True)
         else:
             outfile = filename
-            outdir = filename.parent
+            if isinstance(outfile, str):
+                outfile = Path(outfile)
+            outdir = outfile.parent
             outdir.mkdir(parents=True, exist_ok=True)
+
         def __write():
-            self.df.to_csv(str(outfile), sep="\t", index=True)
+            if full:
+                df = (
+                    self.df.transpose()
+                    .join(self.df_meta_columns)
+                    .transpose()
+                    .join(self.df_meta_rows)
+                )
+            else:
+                df = self.df
+            df.to_csv(str(outfile), sep="\t", index=True)
+
+        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
+
+    def write_excel(self, filename=None, index=False, full=True):
+        if filename is None:
+            outdir = self.result_dir
+            outfile = self.result_dir / (self.name + ".xlsx")
+            self.result_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            outfile = filename
+            if isinstance(outfile, str):
+                outfile = Path(outfile)
+            outdir = outfile.parent
+            outdir.mkdir(parents=True, exist_ok=True)
+
+        def __write():
+            dfs = {"data" : self.df}
+            if full:
+                dfs["meta_columns"] = self.df_meta_columns
+                dfs["meta_rows"]    = self.df_meta_rows
+            writer = pd.ExcelWriter(str(outfile))
+            for sheet_name in dfs:
+                df = dfs[sheet_name]  
+                df.to_excel(writer, sheet_name = sheet_name, index=index)
 
         return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
@@ -801,12 +992,17 @@ class ML(object):
         self.result_dir.mkdir(parents=True, exist_ok=True)
 
         def __write():
-            df = self.df.transpose().join(self.df_meta_columns).transpose().join(self.df_meta_rows)
+            df = (
+                self.df.transpose()
+                .join(self.df_meta_columns)
+                .transpose()
+                .join(self.df_meta_rows)
+            )
             print(df)
             raise ValueError()
             df.to_csv(str(outfile), sep="\t", index=True)
 
-        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
+        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load()).depends_on(self.get_dependencies())
 
     def plot_simple(
         self,
@@ -816,13 +1012,16 @@ class ML(object):
         dependencies=[],
         **params,
     ):
-        dependencies.append(self.load())
+        
+        deps = dependencies
+        deps.append(self.load())
+        deps.extend(self.get_dependencies())
         if outfile is None:
             outfile = Path(self.result_dir) / f"{self.name}_simple_hm.png"
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
-        
+
         def __plot():
             df = self.df
             figure = plots.generate_heatmap_simple_figure(
@@ -837,7 +1036,7 @@ class ML(object):
 
         return (
             ppg.FileGeneratingJob(outfile, __plot)
-            .depends_on(dependencies)
+            .depends_on(deps)
             .depends_on(params_job)
         )
 
@@ -859,6 +1058,7 @@ class ML(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
+
         def __plot():
             df = self.df
             figure = plots.generate_heatmap_figure(
@@ -967,8 +1167,8 @@ class ML(object):
         self,
         outfile=None,
         title=None,
-        class_label_column = None,
-        show_names = False,
+        class_label_column=None,
+        show_names=False,
         dependencies=[],
         **params,
     ):
@@ -978,40 +1178,44 @@ class ML(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
-        row_labels = params.get('label_dict', None)
+        row_labels = params.get("label_dict", None)
+
         def __plot():
             df = self.df
             if class_label_column is not None:
                 if not class_label_column in self.df_meta_rows.columns:
-                    raise ValueError(f"No class label column {class_label_column} in df_meta_rows.")
+                    raise ValueError(
+                        f"No class label column {class_label_column} in df_meta_rows."
+                    )
                 else:
-                    df[class_label_column] = self.df_meta_rows[class_label_column].values
+                    df[class_label_column] = self.df_meta_rows[
+                        class_label_column
+                    ].values
             if row_labels is not None:
                 tmp = []
                 for i in df.index:
                     tmp.append(row_labels[i])
-                df['labels'] = tmp
+                df["labels"] = tmp
             xlabel = ""
             ylabel = ""
             figure = plots.generate_dr_plot(
                 df,
                 title,
                 class_label_column,
-                xlabel = xlabel,
-                ylabel = ylabel,
-                show_names = show_names,
-                **params                
-                ) 
+                xlabel=xlabel,
+                ylabel=ylabel,
+                show_names=show_names,
+                **params,
+            )
             figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         params_job = ppg.ParameterInvariant(
-            outfile.name + "_2d",
-            list(params)
-            + [
-                title,
-            ],
+            outfile.name + "_2d", list(params) + [title,],
         )
-        return ppg.FileGeneratingJob(outfile, __plot).depends_on(dependencies).depends_on(params_job)
-        
-    
+        return (
+            ppg.FileGeneratingJob(outfile, __plot)
+            .depends_on(dependencies)
+            .depends_on(params_job)
+        )
+
