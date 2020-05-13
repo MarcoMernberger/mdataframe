@@ -156,7 +156,7 @@ class ZScaler(Transformer):
         return ret
 
 
-class ML(object):
+class MDF(object):
     def __init__(
         self,
         name,
@@ -166,17 +166,16 @@ class ML(object):
         index_column=None,
         dependencies=[],
         annotators=[],
-        predecessor_objects={},
         **kwargs,
     ):
         """
         This is a wrapper class for a machine learning approach, that takes a dataframe or a
-        genomic region alternatively and does some ML with it.
+        genomic region alternatively and does some machine learning with it.
         @genes_or_df_or_loading_function Dataframe or GenomicRegion containing 2-dimensional data
         @dependencies dependencies
         @annotators annotators to be added to the genomics.genes.Genes object, if given.
         
-        imputation, scaling, transformation and clustering is modeled as functions on ML that return a transformed ml and work on the 
+        imputation, scaling, transformation and clustering is modeled as functions on MDF that return a transformed MDF and work on the 
         relevant part of the dataframe
         """
         self.name = name
@@ -189,17 +188,14 @@ class ML(object):
         self.cache_name = self.name
         if len(name) > 250:
             self.cache_name = str(hash(self.name))
-        self.cache_dir = Path("cache") / "ML" / self.cache_name
+        self.cache_dir = Path("cache") / "MDF" / self.cache_name
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.predecessor_objects = predecessor_objects
         self.result_dir = kwargs.get("result_dir", None)
         if self.result_dir is None:
             if hasattr(genes_or_df_or_loading_function, "result_dir"):
                 self.result_dir = genes_or_df_or_loading_function.result_dir / self.name
-                if "row_labels" not in kwargs:
-                    kwargs["row_labels"] = "name"
             else:
-                self.result_dir = Path("results") / "ML" / self.name
+                self.result_dir = Path("results") / "MDF" / self.name
         self.result_dir.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(
             self.df_or_gene_or_loading_function, mbf_genomics.regions.GenomicRegions
@@ -235,8 +231,6 @@ class ML(object):
         self.dependencies.append(
             ppg.ParameterInvariant(self.name + "_rowid", self.index_column)
         )
-        self.row_labels = kwargs.get("row_labels", None)
-        self.column_labels = kwargs.get("column_labels", None)
         self.dependencies.append(
             ppg.ParameterInvariant(self.name + "_kwargs", list(kwargs),)
         )
@@ -320,6 +314,8 @@ class ML(object):
                 print(self.name)
                 raise ValueError("Load function did not set a Dataframe.")
             dictionary_with_attributes["df"] = df
+            if "aquired_attributes" not in dictionary_with_attributes:
+                dictionary_with_attributes["aquired_attributes"] = []
             assert df_meta_rows.index.equals(df.index)
             assert df_meta_columns.index.equals(df.columns)
             return dictionary_with_attributes
@@ -485,8 +481,6 @@ class ML(object):
 
                         assert df_scaled.columns.equals(df_meta_columns.index)
                         df_scaled = df_scaled.sort_values(by=by, axis=ax, ascending=ac)
-                        print(df_scaled.columns)
-                        print(df_meta_columns.index)
                         df_meta_columns = df_meta_columns.loc[df_scaled.columns]
                         for col in tmp_cols:
                             df_scaled = df_scaled.drop(col, axis=0)
@@ -502,13 +496,12 @@ class ML(object):
             }
 
         deps.append(ppg.FunctionInvariant(new_name + "_sort", __scale))
-        return ML(
+        return MDF(
             new_name,
             __scale,
             index_column=self.index_column,
             dependencies=deps,
             annotators=self.annotators,
-            predecessor_objects=self.predecessor_objects,
         )
 
     def __interpret_transformations_and_dependencies(self, *transformations, **kwargs):
@@ -568,6 +561,7 @@ class ML(object):
                     positional = []
                     keyargs = {}
                     for item in transformation[1:]:
+                        print(item)
                         if isinstance(item, list):
                             positional.extend(item)
                         elif isinstance(item, dict):
@@ -627,7 +621,7 @@ class ML(object):
         modify_main = kwargs.get("transform_data", True)
         modify_meta_rows = kwargs.get("transform_meta_rows", False)
         modify_meta_columns = kwargs.get("transform_meta_columns", False)
-        modify = [modify_main, modify_meta_rows, modify_meta_columns] 
+        modify = [modify_main, modify_meta_rows, modify_meta_columns]
         # sometimes you might want to apply the transformation to the meta dfs as well .. rename comes to mind
 
         new_name = self.name
@@ -639,38 +633,29 @@ class ML(object):
             if ttype == 0:  # callable
                 if axis == 0:
 
-                    def transformation_call(
-                        df,
-                        df_meta_rows,
-                        df_meta_columns,
-                        modify
-                    ):
+                    def transformation_call(df, df_meta_rows, df_meta_columns, modify):
                         if modify[0]:
                             df = df.apply(transformation, axis=0)
                         if modify[1]:
                             df_meta_rows = df_meta_rows.apply(transformation, axis=0)
                         return df, df_meta_rows, df_meta_columns
+
                 elif axis == 1:
 
-                    def transformation_call(
-                        df,
-                        df_meta_rows,
-                        df_meta_columns,
-                        modify
-                    ):
+                    def transformation_call(df, df_meta_rows, df_meta_columns, modify):
                         if modify[0]:
-                            df = df.transpose().apply(transformation, axis=0).transpose()
+                            df = (
+                                df.transpose().apply(transformation, axis=0).transpose()
+                            )
                         if modify[2]:
-                            df_meta_columns = df_meta_columns.apply(transformation, axis=0)
+                            df_meta_columns = df_meta_columns.apply(
+                                transformation, axis=0
+                            )
                         return df, df_meta_rows, df_meta_columns
 
-                else:                        
-                    def transformation_call(
-                        df,
-                        df_meta_rows,
-                        df_meta_columns,
-                        modify
-                        ):
+                else:
+
+                    def transformation_call(df, df_meta_rows, df_meta_columns, modify):
                         indices = np.array([0, 1, 2])[[modify]]
                         dfs = [df, df_meta_rows, df_meta_columns]
                         params = []
@@ -679,34 +664,22 @@ class ML(object):
                             if param in locals():
                                 params.append(locals()[param])
                             else:
-                                raise ValueError("The parameter {param} of given callable is not in local scope.")
-                        print(transformation)
-                        print(*params)
+                                raise ValueError(
+                                    "The parameter {param} of given callable is not in local scope."
+                                )
                         ret = transformation(*params)
                         if isinstance(ret, tuple):
                             ret = list(ret)
                         else:
                             ret = [ret]
-                        print(ret)
-                        print(indices)
-                        print(self.name)
-                        print(dfs)
                         assert len(ret) == len(indices)
                         for i, index in enumerate(indices):
                             dfs[index] = ret[i]
-                        print(dfs)
-                        #if self.name == "KNN_NM-WT_vs_NM-GFP_FDR05_LF1_all_Im(nan0)_scale_Cl(KNN_1)_axis_1_Cl(Agglo)_axis_0":
-                        #    raise ValueError()
                         return dfs[0], dfs[1], dfs[2]
 
             elif ttype == 1:  # pandas method
 
-                def transformation_call(
-                    df,
-                    df_meta_rows,
-                    df_meta_columns,
-                    modify
-                ):
+                def transformation_call(df, df_meta_rows, df_meta_columns, modify):
                     dfs = [df, df_meta_rows, df_meta_columns]
                     for i, mod in enumerate(modify):
                         if mod:
@@ -716,17 +689,14 @@ class ML(object):
 
             elif ttype == 2:  # list of pandas methods and arguments
 
-                def transformation_call(
-                    df,
-                    df_meta_rows,
-                    df_meta_columns,
-                    modify
-                ):
+                def transformation_call(df, df_meta_rows, df_meta_columns, modify):
                     dfs = [df, df_meta_rows, df_meta_columns]
                     for i, mod in enumerate(modify):
+                        df = dfs[i]
                         if mod:
                             func = getattr(df, transformation[0])
-                            dfs[i] = func(*transformation[1], **transformation[2]) 
+                            dfs[i] = func(*transformation[1], **transformation[2])
+
                     return dfs[0], dfs[1], dfs[2]
 
             return transformation_call
@@ -740,10 +710,7 @@ class ML(object):
                     ttype, axis, transformation
                 )
                 df_scaled, df_meta_rows, df_meta_columns = transformation_callable(
-                    df_scaled,
-                    df_meta_rows,
-                    df_meta_columns,
-                    modify
+                    df_scaled, df_meta_rows, df_meta_columns, modify
                 )
 
             # if the index has changed, the meta dfs loose there 1 to 1 mapping, so discard them
@@ -754,42 +721,61 @@ class ML(object):
             assert isinstance(df_scaled, pd.DataFrame)
             assert isinstance(df_meta_rows, pd.DataFrame)
             assert isinstance(df_meta_columns, pd.DataFrame)
-            #check for doubles in meta dfs
+            # check for doubles in meta dfs
             double_column = set(df_scaled.columns).intersection(df_meta_rows.columns)
             for col in double_column:
-                df_meta_rows = df_meta_rows.drop(col, axis = 1)
+                df_meta_rows = df_meta_rows.drop(col, axis=1)
             double_row = set(df_scaled.index).intersection(df_meta_columns.columns)
             for col in double_row:
-                df_meta_columns = df_meta_columns.drop(col, axis = 0)
-            return {
+                df_meta_columns = df_meta_columns.drop(col, axis=0)
+            attr_dict = {
                 "df": df_scaled,
                 "rows": df_scaled.index.values,
                 "columns": df_scaled.columns.values,
                 "df_meta_rows": df_meta_rows,
                 "df_meta_columns": df_meta_columns,
             }
+            aquired_attributes = []
+            for attr in self.aquired_attributes:
+                aquired_attributes.append(attr)
+                attr_dict[attr] = getattr(self, attr)
+            attr_dict["aquired_attributes"] = aquired_attributes
+            return attr_dict
 
         deps.append(ppg.FunctionInvariant(new_name + "_func", __scale))
-        return ML(
+        return MDF(
             new_name,
             __scale,
             index_column=self.index_column,
             dependencies=deps,
             annotators=self.annotators,
-            predecessor_objects=self.predecessor_objects,
         )
 
     def add_meta_column(self, *transformations):
-        return self.transform(*transformations, axis=None, transform_data = False, transform_meta_rows = True)
+        return self.transform(
+            *transformations, axis=None, transform_data=False, transform_meta_rows=True
+        )
 
     def add_meta_row(self, *transformations):
-        return self.transform(*transformations, axis=None, transform_data = False, transform_meta_columns = True)
+        return self.transform(
+            *transformations,
+            axis=None,
+            transform_data=False,
+            transform_meta_columns=True,
+        )
 
-    def add_meta(self, *transformations, axis = 0):
+    def add_meta(self, *transformations, axis=0):
         if axis == 0:
-            return self.transform(*transformations, axis, transform_data = False, transform_meta_rows = True)
+            return self.transform(
+                *transformations, axis, transform_data=False, transform_meta_rows=True
+            )
         else:
-            return self.transform(*transformations, axis, transform_data = False, transform_meta_columns = True)
+            return self.transform(
+                *transformations,
+                axis,
+                transform_data=False,
+                transform_meta_columns=True,
+            )
 
     def impute(self, *transformations, axis=1):
 
@@ -827,47 +813,65 @@ class ML(object):
         def __do_cluster():
             if not isinstance(strategy, strategies.ClusteringMethod):
                 raise ValueError(
-                    "Please supply a valid clustering strategy. Needs to be an instance of {}"
+                    f"Please supply a valid clustering strategy. Needs to be an instance of {strategies.ClusteringMethod}, was {type(strategy)}."
                 )
             df = self.df.copy()
             df_meta_columns = self.df_meta_columns.copy()
             df_meta_rows = self.df_meta_rows.copy()
             if axis == 0:
                 df = df.transpose()
-            strategy.fit(df, **fit_parameter)
-            if axis == 0:
-                # cluster columns
-                df_meta_columns = df_meta_columns.join(strategy.clusters)
-                df_meta_columns[strategy.name] = df_meta_columns[strategy.name].fillna(
-                    -1
-                )
-                df = df.transpose()
+            check = 0
+            if hasattr(strategy, "no_of_clusters"):
+                check = strategy.no_of_clusters
+            if df.shape[0] > check:
+                strategy.fit(df, **fit_parameter)
+                if axis == 0:
+                    # cluster columns
+                    df_meta_columns = df_meta_columns.join(strategy.clusters)
+                    df_meta_columns[strategy.name] = df_meta_columns[
+                        strategy.name
+                    ].fillna(-1)
+                    df = df.transpose()
+                else:
+                    # cluster rows
+                    df_meta_rows = df_meta_rows.join(strategy.clusters)
+                    df_meta_rows[strategy.name] = df_meta_rows[strategy.name].fillna(-1)
             else:
-                # cluster rows
-                df_meta_rows = df_meta_rows.join(strategy.clusters)
-                df_meta_rows[strategy.name] = df_meta_rows[strategy.name].fillna(-1)
-            self.predecessor_objects[strategy.name] = strategy
-            return {
+                if axis == 0:
+                    df_meta_columns[strategy.name] = [0] * len(df_meta_columns)
+                    df = df.transpose()
+                else:
+                    df_meta_rows[strategy.name] = [0] * len(df_meta_rows)
+            attr_dict = {
                 "df": self.df,
                 "columns": df.columns.values,
                 "rows": df.index.values,
                 "df_meta_rows": df_meta_rows,
                 "df_meta_columns": df_meta_columns,
             }
+            aquired_attributes = self.aquired_attributes
+            for attr in self.aquired_attributes:
+                attr_dict[attr] = getattr(self, attr)
+            aquired_attributes.append(strategy.name)
+            if not "last_model" in aquired_attributes:
+                aquired_attributes.append("last_model")
+            attr_dict[strategy.name] = strategy
+            attr_dict["last_model"] = strategy
+            attr_dict["aquired_attributes"] = aquired_attributes
+            return attr_dict
 
         deps.append(ppg.FunctionInvariant(new_name + "_do_Cluster", __do_cluster))
-        return ML(
+        return MDF(
             new_name,
             __do_cluster,
             index_column=self.index_column,
             dependencies=deps,
             annotators=self.annotators,
-            predecessor_objects=self.predecessor_objects,
         )
 
     def reduce(self, dimensionality_reduction=None, axis=1, name=None, **fit_parameter):
         """
-        This performas a dimensionality reduction on df and returns a new ML wich now contains the reduced matrix.
+        This performas a dimensionality reduction on df and returns a new MDF wich now contains the reduced matrix.
         """
         strategy = dimensionality_reduction
         if dimensionality_reduction is None:
@@ -887,6 +891,10 @@ class ML(object):
         new_resdir = self.result_dir.parent / new_name
 
         def __do_reduce():
+            if strategy.name in self.aquired_attributes:
+                raise ValueError(
+                    f"Strategy named {strategy.name} has already been added to this MDF. Please specify a strategy with a different name."
+                )
             if not isinstance(strategy, strategies.DimensionalityReduction):
                 raise ValueError(
                     "Please supply a valid clustering strategy. Needs to be an instance of {}"
@@ -896,44 +904,54 @@ class ML(object):
             df_meta_columns = self.df_meta_columns.copy()
             if axis == 1:
                 df = df.transpose()
-            strategy.fit(df, **fit_parameter)
-            columns = self.columns
-            rows = self.rows
-            ret = {}
-            if axis == 1:
-                # columns are data points ...
-                new_df = pd.DataFrame(
-                    strategy.reduced_matrix.transpose(),
-                    index=new_index,
-                    columns=df.index,
-                )
-                df = new_df.transpose()
-                df_meta_rows = pd.DataFrame({}, index=df.index)
-            else:
-                # rows are data points
-                df = pd.DataFrame(
-                    strategy.reduced_matrix, index=df.index, columns=new_index
-                )
-                df_meta_columns = pd.DataFrame({}, index=df.index.columns)
+
+            if df.shape[1] > strategy.dimensions:
+                strategy.fit(df, **fit_parameter)
+                columns = self.columns
+                rows = self.rows
+                if axis == 1:
+                    # columns are data points ...
+                    new_df = pd.DataFrame(
+                        strategy.reduced_matrix.transpose(),
+                        index=new_index,
+                        columns=df.index,
+                    )
+                    df = new_df.transpose()
+                    df_meta_rows = pd.DataFrame({}, index=df.index)
+                else:
+                    # rows are data points
+                    df = pd.DataFrame(
+                        strategy.reduced_matrix, index=df.index, columns=new_index
+                    )
+                    df_meta_columns = pd.DataFrame({}, index=df.index.columns)
             rows = df.index.values
             columns = df.columns.values
-            self.predecessor_objects[strategy.name] = strategy
-            return {
+            attr_dict = {
                 "df": df,
                 "columns": columns,
                 "rows": rows,
                 "df_meta_rows": df_meta_rows,
                 "df_meta_columns": df_meta_columns,
+                "last_model": strategy,
             }
+            aquired_attributes = self.aquired_attributes
+            for attr in self.aquired_attributes:
+                attr_dict[attr] = getattr(self, attr)
+            if "last_model" not in aquired_attributes:
+                aquired_attributes.append("last_model")
+            aquired_attributes.append(strategy.name)
+            attr_dict[strategy.name] = strategy
+            attr_dict["last_model"] = strategy
+            attr_dict["aquired_attributes"] = aquired_attributes
+            return attr_dict
 
         deps.append(ppg.FunctionInvariant(new_name + "__do_reducefunc", __do_reduce))
-        return ML(
+        return MDF(
             new_name,
             __do_reduce,
             index_column=self.index_column,
             dependencies=deps,
             annotators=self.annotators,
-            predecessor_objects=self.predecessor_objects,
             result_dir=new_resdir,
         )
 
@@ -961,7 +979,13 @@ class ML(object):
                 df = self.df
             df.to_csv(str(outfile), sep="\t", index=True)
 
-        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
+        return (
+            ppg.FileGeneratingJob(outfile, __write)
+            .depends_on(self.load())
+            .depends_on(
+                ppg.ParameterInvariant(f"PI_{outfile}", [index, full, self.name])
+            )
+        )
 
     def write_excel(self, filename=None, index=False, full=True):
         if filename is None:
@@ -976,33 +1000,16 @@ class ML(object):
             outdir.mkdir(parents=True, exist_ok=True)
 
         def __write():
-            dfs = {"data" : self.df}
+            dfs = {"data": self.df}
             if full:
                 dfs["meta_columns"] = self.df_meta_columns
-                dfs["meta_rows"]    = self.df_meta_rows
+                dfs["meta_rows"] = self.df_meta_rows
             writer = pd.ExcelWriter(str(outfile))
             for sheet_name in dfs:
-                df = dfs[sheet_name]  
-                df.to_excel(writer, sheet_name = sheet_name, index=index)
+                df = dfs[sheet_name]
+                df.to_excel(writer, sheet_name=sheet_name, index=index)
 
         return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
-
-    def write_full(self):
-        outfile = self.result_dir / (self.name + "_full.tsv")
-        self.result_dir.mkdir(parents=True, exist_ok=True)
-
-        def __write():
-            df = (
-                self.df.transpose()
-                .join(self.df_meta_columns)
-                .transpose()
-                .join(self.df_meta_rows)
-            )
-            print(df)
-            raise ValueError()
-            df.to_csv(str(outfile), sep="\t", index=True)
-
-        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load()).depends_on(self.get_dependencies())
 
     def plot_simple(
         self,
@@ -1012,7 +1019,7 @@ class ML(object):
         dependencies=[],
         **params,
     ):
-        
+
         deps = dependencies
         deps.append(self.load())
         deps.extend(self.get_dependencies())
@@ -1024,10 +1031,15 @@ class ML(object):
 
         def __plot():
             df = self.df
-            figure = plots.generate_heatmap_simple_figure(
-                df, title, show_column_label=show_column_label, **params
-            )
-            figure.savefig(outfile)
+            if df.shape[0] == 0 or df.shape[1] == 0:
+                fig = plt.figure()
+                plt.text(1, 1, "Empty DataFrame")
+                fig.savefig(outfile)
+            else:
+                figure = plots.generate_heatmap_simple_figure(
+                    df, title, show_column_label=show_column_label, **params
+                )
+                figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         params_job = ppg.ParameterInvariant(
@@ -1061,20 +1073,25 @@ class ML(object):
 
         def __plot():
             df = self.df
-            figure = plots.generate_heatmap_figure(
-                df,
-                title,
-                display_linkage_column=display_linkage_column,
-                display_linkage_row=display_linkage_row,
-                legend_location=legend_location,
-                show_column_label=show_column_label,
-                show_row_label=show_row_label,
-                **params,
-            )
-            #    max_inches_to_plot = 60000 / (2*dpi)
-            #    if inches_top+inches_bottom >= max_inches_to_plot:
-            #    raise ValueError("The figure you are trying to plot is too large.")
-            figure.savefig(outfile)
+            if df.shape[0] == 0 or df.shape[1] == 0:
+                fig = plt.figure()
+                plt.text(1, 1, "Empty DataFrame")
+                fig.savefig(outfile)
+            else:
+                figure = plots.generate_heatmap_figure(
+                    df,
+                    title,
+                    display_linkage_column=display_linkage_column,
+                    display_linkage_row=display_linkage_row,
+                    legend_location=legend_location,
+                    show_column_label=show_column_label,
+                    show_row_label=show_row_label,
+                    **params,
+                )
+                #    max_inches_to_plot = 60000 / (2*dpi)
+                #    if inches_top+inches_bottom >= max_inches_to_plot:
+                #    raise ValueError("The figure you are trying to plot is too large.")
+                figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         params_job = ppg.ParameterInvariant(
@@ -1116,6 +1133,8 @@ class ML(object):
         elif isinstance(outf, str):
             outf = Path(outf)
         outf.parent.mkdir(parents=True, exist_ok=True)
+        if outf.name.endswith("png"):
+            raise ValueError("Output format for multipage plot must be pdf.")
 
         def __plot():
             dpi = params.get("dpi", 300)
@@ -1123,26 +1142,30 @@ class ML(object):
             df = self.df
             len_y = len(df)
             max_inches_to_plot = 60000 / (2 * dpi)
-
             max_rows_per_page = max_inches_to_plot * rows_per_inch
             split_indices = np.arange(0, len(df), max_rows_per_page)
-            pdf = PdfPages(outf)
-            for index in split_indices:
-                fro = df.index[index]
-                to = df.index[min(index + max_rows_per_page, len_y - 1)]
-                df_sub = df.loc[fro:to]
-                fig = plots.generate_heatmap_figure(
-                    df_sub,
-                    title,
-                    display_linkage_column=display_linkage_column,
-                    display_linkage_row=display_linkage_row,
-                    legend_location=legend_location,
-                    show_column_label=show_column_label,
-                    show_row_label=show_row_label,
-                    **params,
-                )
-                pdf.savefig(fig)
-            pdf.close()
+            if df.shape[0] == 0 or df.shape[1] == 0:
+                fig = plt.figure()
+                plt.text(1, 1, "Empty DataFrame")
+                fig.savefig(outf)
+            else:
+                pdf = PdfPages(outf)
+                for index in split_indices:
+                    fro = df.index[index]
+                    to = df.index[min(index + max_rows_per_page, len_y - 1)]
+                    df_sub = df.loc[fro:to]
+                    fig = plots.generate_heatmap_figure(
+                        df_sub,
+                        title,
+                        display_linkage_column=display_linkage_column,
+                        display_linkage_row=display_linkage_row,
+                        legend_location=legend_location,
+                        show_column_label=show_column_label,
+                        show_row_label=show_row_label,
+                        **params,
+                    )
+                    pdf.savefig(fig)
+                pdf.close()
             df.to_csv(str(outf) + ".tsv", index=False, sep="\t")
 
         params_job = ppg.ParameterInvariant(
@@ -1182,32 +1205,44 @@ class ML(object):
 
         def __plot():
             df = self.df
-            if class_label_column is not None:
-                if not class_label_column in self.df_meta_rows.columns:
-                    raise ValueError(
-                        f"No class label column {class_label_column} in df_meta_rows."
-                    )
-                else:
-                    df[class_label_column] = self.df_meta_rows[
-                        class_label_column
-                    ].values
-            if row_labels is not None:
-                tmp = []
-                for i in df.index:
-                    tmp.append(row_labels[i])
-                df["labels"] = tmp
-            xlabel = ""
-            ylabel = ""
-            figure = plots.generate_dr_plot(
-                df,
-                title,
-                class_label_column,
-                xlabel=xlabel,
-                ylabel=ylabel,
-                show_names=show_names,
-                **params,
-            )
-            figure.savefig(outfile)
+            dim = params.get("dimension", 2)
+            model = params.get("model", "last_model")
+            if len(df) > 0 and df.shape[1] > dim:
+                if class_label_column is not None:
+                    if not class_label_column in self.df_meta_rows.columns:
+                        raise ValueError(
+                            f"No class label column {class_label_column} in df_meta_rows."
+                        )
+                    else:
+                        df[class_label_column] = self.df_meta_rows[
+                            class_label_column
+                        ].values
+                if row_labels is not None:
+                    tmp = []
+                    for i in df.index:
+                        tmp.append(row_labels[i])
+                    df["labels"] = tmp
+                xlabel = ""
+                ylabel = ""
+                if hasattr(self, model):
+                    model = getattr(self, model)
+                    if hasattr(model, "explained_variance_ratio"):
+                        xlabel = f" ({model.explained_variance_ratio[0]*100:.2f}%)"
+                        ylabel = f" ({model.explained_variance_ratio[1]*100:.2f}%)"
+                figure = plots.generate_dr_plot(
+                    df,
+                    title,
+                    class_label_column,
+                    xlabel=xlabel,
+                    ylabel=ylabel,
+                    show_names=show_names,
+                    **params,
+                )
+                figure.savefig(outfile)
+            else:
+                fig = plt.figure()
+                plt.text(1, 1, "Empty DataFrame")
+                fig.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         params_job = ppg.ParameterInvariant(
@@ -1218,4 +1253,3 @@ class ML(object):
             .depends_on(dependencies)
             .depends_on(params_job)
         )
-

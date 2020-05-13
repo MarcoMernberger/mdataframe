@@ -184,6 +184,10 @@ class NewKMeans(ClusteringMethod):
     def clustering(self):
         return self.__clustering
 
+    @property
+    def no_of_clusters(self):
+        return self.__no_of_clusters
+
 class ClassLabel(ClusteringMethod):
     def __init__(
         self,
@@ -328,6 +332,10 @@ class SKlearnAgglomerative(ClusteringMethod):
     @property
     def clustering(self):
         return self.__clustering
+
+    @property
+    def no_of_clusters(self):
+        return self.__no_of_clusters
 
 '''
     def new_fit_function(self):

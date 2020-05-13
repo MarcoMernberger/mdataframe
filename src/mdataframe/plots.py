@@ -387,7 +387,7 @@ def generate_heatmap_simple_figure(
     df,
     title=None,
     show_column_label=True,
-    show_row_label = False,
+    show_row_label=False,
     **params
 ):
     """
@@ -398,9 +398,9 @@ def generate_heatmap_simple_figure(
     fontsize_title = params.get("fontsize_title", 12)
     fontsize_columns = params.get("fontsize_column", 12)
     fontsize_rows = params.get("fontsize_rows", 12)
-    dpi = params.get("dpi", 300)
-    fig_x = params.get("fig_x", 8)
-    fig_y = params.get("fig_x", 16)
+    dpi = params.get("dpi", 150)
+    fig_x = params.get("fig_x", 50)
+    fig_y = params.get("fig_y", 50)
     shrink = params.get("shrink", 1)
     f = plt.figure(
         figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
@@ -410,26 +410,30 @@ def generate_heatmap_simple_figure(
     vmin = params.get("vmin", df.min().min())
     aspect = params.get("aspect", "auto")
     norm = matplotlib.colors.Normalize(vmin, vmax)
-    im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect = aspect)
-    plt.colorbar(im, shrink = shrink)
-    # add the labels
-    if show_column_label:
-        plt.gca().set_xticks(range(len(df.columns)))
-        plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
-    if show_row_label:
-        plt.gca().set_yticks(range(len(df.index)))
-        plt.gca().set_yticklabels(df.index.values, rotation=75, ha="right", fontsize=fontsize_rows)
-    plt.gca().set_yticklabels([])
-    # set the title
-    if title is not None:
-        plt.title(title, fontsize=fontsize_title)
-    plt.tight_layout()
+    print(df)
+    print(df.shape)
+#    raise ValueError()
+    im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect=aspect)
+    #plt.colorbar(im, shrink = shrink)
+    ## add the labels
+    #if show_column_label:
+    #    plt.gca().set_xticks(range(len(df.columns)))
+    #    plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
+    #if show_row_label:
+    #    plt.gca().set_yticks(range(len(df.index)))
+    #    plt.gca().set_yticklabels(df.index.values, rotation=75, ha="right", fontsize=fontsize_rows)
+    #plt.gca().set_yticklabels([])
+    ## set the title
+    #if title is not None:
+    #    plt.title(title, fontsize=fontsize_title)
+    #plt.tight_layout()
     plt.close()
     return f
 
+
 def generate_dr_plot(df,
     title=None,
-    class_label_column = 'class_labels',
+    class_label_column='class_labels',
     **params):
     """
     This assumes that self.transformed_matrix is an array-like object with shape (n_samples, n_components)
@@ -441,7 +445,7 @@ def generate_dr_plot(df,
     y_suffix = params.get("ylabel", "")
     dpi = params.get("dpi", 300)
     fig_x = params.get("fig_x", 8)
-    fig_y = params.get("fig_x", 8)
+    fig_y = params.get("fig_y", 8)
     f = plt.figure(
         figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
         )
@@ -464,15 +468,13 @@ def generate_dr_plot(df,
         raise ValueError(f"No 2D projection possible with only {dimensions} components, set k >= 2.")
     if len(columns_to_use) > 2:
         columns_to_use = columns_to_use[:2]
-    #markers = itertools.cycle(('o', 'v', '^', '*', 's', '+'))
     custom_cycler = (cycler(color=["b", "g", "r", "c", "k", "m", "y", "grey", "darkblue", "darkgreen", "darkred", "darkcyan", "darkviolet", "gold", "slategrey"]) +
                 cycler(marker=['o', 'v', '^', '*', 's', '<', '>', '+', 'o', 'v', '^', '*', 's', '<', '>'])
-                )        
+                )
     plt.gca().set_prop_cycle(custom_cycler)
     #ax_data = figure.add_subplot(111)            
-    print(df)
     for i, df_sub in df.groupby(class_label_column):
-        plt.plot(df_sub[columns_to_use[0]].values, df_sub[columns_to_use[1]].values, marker = "o", markersize=7, alpha=0.8, label=i, linestyle="None")
+        plt.plot(df_sub[columns_to_use[0]].values, df_sub[columns_to_use[1]].values, marker="o", markersize=7, alpha=0.8, label=i, linestyle="None")
 #    raise ValueError()
     """
     if class_label_dict is not None:
@@ -494,11 +496,11 @@ def generate_dr_plot(df,
         #ax_data.scatter(self.transformed_matrix[:,0], self.transformed_matrix[:,1], marker = 'o', c=color, cmap = 'plasma', alpha=0.5)
     """
     if title is not None:
-        plt.title(title, fontsize = fontsize_title)
+        plt.title(title, fontsize=fontsize_title)
     elif class_labels:
-        plt.title('Transformed samples with classes', fontsize = fontsize_title)
+        plt.title('Transformed samples with classes', fontsize=fontsize_title)
     else:
-        plt.title('Transformed samples without classes', fontsize = fontsize_title)
+        plt.title('Transformed samples without classes', fontsize=fontsize_title)
     xmin = df[columns_to_use[0]].values.min()
     ymin = df[columns_to_use[1]].values.min()
     xmax = df[columns_to_use[0]].values.max()
@@ -508,11 +510,11 @@ def generate_dr_plot(df,
     plt.gca().set_xlabel(f"{columns_to_use[0]}{x_suffix}")
     plt.gca().set_ylabel(f"{columns_to_use[1]}{y_suffix}")
     if class_labels:
-        plt.gca().legend()
+        plt.gca().legend(loc='best')
     if show_names:
         for i, row in df.iterrows():
             plt.annotate(
-                row['labels'], 
-                xy = (row[columns_to_use[0]], row[columns_to_use[1]]), xytext = (-1, 1),
-                textcoords = 'offset points', ha = 'right', va = 'bottom', size = 8)
+                row['labels'],
+                xy=(row[columns_to_use[0]], row[columns_to_use[1]]), xytext=(-1, 1),
+                textcoords='offset points', ha='right', va='bottom', size=8)
     return f

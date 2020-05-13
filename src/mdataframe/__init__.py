@@ -20,5 +20,5 @@ finally:
     del get_distribution, DistributionNotFound
 
 
-from .clustering import *
+from .mdataframe import *
 from .strategies import *
