@@ -399,34 +399,31 @@ def generate_heatmap_simple_figure(
     fontsize_columns = params.get("fontsize_column", 12)
     fontsize_rows = params.get("fontsize_rows", 12)
     dpi = params.get("dpi", 150)
-    fig_x = params.get("fig_x", 50)
-    fig_y = params.get("fig_y", 50)
-    shrink = params.get("shrink", 1)
+    fig_x = params.get("fig_x", df.shape[1])
+    fig_y = params.get("fig_y", len(df)*4/dpi)
+    shrink = params.get("shrink", .05)
     f = plt.figure(
         figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
     )
     colormap = params.get("colormap", "seismic")
-    vmax = params.get("vmax", df.max().max())
-    vmin = params.get("vmin", df.min().min())
+    vmax = params.get("vmax", df.abs().max().max())
+    vmin = -vmax  # to ensure zero midpoint
     aspect = params.get("aspect", "auto")
     norm = matplotlib.colors.Normalize(vmin, vmax)
-    print(df)
-    print(df.shape)
-#    raise ValueError()
     im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect=aspect)
-    #plt.colorbar(im, shrink = shrink)
-    ## add the labels
-    #if show_column_label:
-    #    plt.gca().set_xticks(range(len(df.columns)))
-    #    plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
-    #if show_row_label:
-    #    plt.gca().set_yticks(range(len(df.index)))
-    #    plt.gca().set_yticklabels(df.index.values, rotation=75, ha="right", fontsize=fontsize_rows)
-    #plt.gca().set_yticklabels([])
-    ## set the title
-    #if title is not None:
-    #    plt.title(title, fontsize=fontsize_title)
-    #plt.tight_layout()
+    plt.colorbar(im, shrink=shrink)
+    # add the labels
+    if show_column_label:
+        plt.gca().set_xticks(range(len(df.columns)))
+        plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
+    if show_row_label:
+        plt.gca().set_yticks(range(len(df.index)))
+        plt.gca().set_yticklabels(df.index.values, rotation=75, ha="right", fontsize=fontsize_rows)
+    plt.gca().set_yticklabels([])
+    # set the title
+    if title is not None:
+        plt.title(title, fontsize=fontsize_title)
+    plt.tight_layout()
     plt.close()
     return f
 
@@ -518,3 +515,8 @@ def generate_dr_plot(df,
                 xy=(row[columns_to_use[0]], row[columns_to_use[1]]), xytext=(-1, 1),
                 textcoords='offset points', ha='right', va='bottom', size=8)
     return f
+
+def plot_empty(outfile, msg="Empty DataFrame"):
+    fig = plt.figure()
+    plt.text(.5, .5, msg, ha='left', va="center")
+    fig.savefig(outfile)

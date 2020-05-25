@@ -3,8 +3,13 @@ Created on Aug 28, 2015
 
 @author: mernberger
 """
+from matplotlib.backends.backend_pdf import PdfPages
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from pathlib import Path
+from inspect import signature
+from . import plots
+from . import strategies
 import matplotlib
-
 matplotlib.use("agg")
 import pypipegraph as ppg
 import mbf_genomics
@@ -20,17 +25,11 @@ import scipy.cluster.hierarchy
 import matplotlib.pyplot as plt
 import pandas as pd
 import pickle
-from matplotlib.backends.backend_pdf import PdfPages
 import math
 import matplotlib.gridspec as grid
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from pathlib import Path
-from . import plots
-from . import strategies
 import functools
 import collections
-from inspect import signature
-
+import warnings
 
 def equality_of_function(func1, func2):
     eq_bytecode = func1.__code__.co_code == func1.__code__.co_code
@@ -39,6 +38,9 @@ def equality_of_function(func1, func2):
     eq_conames = func1.__code__.co_names == func1.__code__.co_names
     eq_varnames = func1.__code__.co_varnames == func1.__code__.co_varnames
     return eq_bytecode & eq_closure & eq_conames & eq_constants & eq_varnames
+
+
+warnings.simplefilter("always", UserWarning)
 
 
 class ClusterAnnotator(mbf_genomics.annotator.Annotator):
@@ -1070,28 +1072,34 @@ class MDF(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
-
+        
         def __plot():
             df = self.df
-            if df.shape[0] == 0 or df.shape[1] == 0:
-                fig = plt.figure()
-                plt.text(1, 1, "Empty DataFrame")
-                fig.savefig(outfile)
+            if not (df.shape[0] == 0 or df.shape[1] == 0):
+                try:
+                    figure = plots.generate_heatmap_figure(
+                        df,
+                        title,
+                        display_linkage_column=display_linkage_column,
+                        display_linkage_row=display_linkage_row,
+                        legend_location=legend_location,
+                        show_column_label=show_column_label,
+                        show_row_label=show_row_label,
+                        **params,
+                    )
+                    figure.savefig(outfile)
+                except ValueError as err:
+                    msg = str(err)
+                    if msg.startswith("The number of pixels is too large"):
+                        import warnings
+                        warnings.warn(
+                            f"{msg} Empty plot written."
+                            )
+                        plots.plot_empty(outfile, msg.split(",")[0])
+                    else:
+                        raise err
             else:
-                figure = plots.generate_heatmap_figure(
-                    df,
-                    title,
-                    display_linkage_column=display_linkage_column,
-                    display_linkage_row=display_linkage_row,
-                    legend_location=legend_location,
-                    show_column_label=show_column_label,
-                    show_row_label=show_row_label,
-                    **params,
-                )
-                #    max_inches_to_plot = 60000 / (2*dpi)
-                #    if inches_top+inches_bottom >= max_inches_to_plot:
-                #    raise ValueError("The figure you are trying to plot is too large.")
-                figure.savefig(outfile)
+                plots.plot_empty(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         params_job = ppg.ParameterInvariant(
