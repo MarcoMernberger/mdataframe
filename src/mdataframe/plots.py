@@ -12,6 +12,7 @@ from cycler import cycler
 
 def generate_heatmap_figure(
     df,
+    label_function=None,
     title=None,
     display_linkage_column=None,
     display_linkage_row=None,
@@ -204,9 +205,9 @@ def generate_heatmap_figure(
     norm = matplotlib.colors.Normalize(vmin, vmax)
 
     # add the labels
-    ax_matrix.set_yticklabels(df.index.values, fontsize=fontsizey)
+    ax_matrix.set_yticklabels([label_function(label) for label in df.index.values], fontsize=fontsizey)
     ax_matrix.set_xticklabels(
-        df.columns.values, rotation=75, ha="right", fontsize=fontsizex
+        [label_function(label) for label in df.columns.values], rotation=75, ha="right", fontsize=fontsizex
     )
 
     # actually plot the heatmap
@@ -388,6 +389,7 @@ def generate_heatmap_simple_figure(
     title=None,
     show_column_label=True,
     show_row_label=False,
+    label_function=None,
     **params
 ):
     """
@@ -399,9 +401,15 @@ def generate_heatmap_simple_figure(
     fontsize_columns = params.get("fontsize_column", 12)
     fontsize_rows = params.get("fontsize_rows", 12)
     dpi = params.get("dpi", 150)
+<<<<<<< HEAD
     fig_x = params.get("fig_x", df.shape[1])
     fig_y = params.get("fig_y", len(df)*4/dpi)
     shrink = params.get("shrink", .05)
+=======
+    fig_x = params.get("fig_x", 20)
+    fig_y = params.get("fig_y", 20)
+    shrink = params.get("shrink", 1)
+>>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
     f = plt.figure(
         figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
     )
@@ -412,6 +420,7 @@ def generate_heatmap_simple_figure(
     norm = matplotlib.colors.Normalize(vmin, vmax)
     im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect=aspect)
     plt.colorbar(im, shrink=shrink)
+<<<<<<< HEAD
     # add the labels
     if show_column_label:
         plt.gca().set_xticks(range(len(df.columns)))
@@ -421,6 +430,26 @@ def generate_heatmap_simple_figure(
         plt.gca().set_yticklabels(df.index.values, rotation=75, ha="right", fontsize=fontsize_rows)
     plt.gca().set_yticklabels([])
     # set the title
+=======
+    #  add the labels
+    if show_column_label:
+        columns = df.columns.values
+        if label_function is not None:
+            columns = [label_function(label) for label in df.columns.values]
+        plt.gca().set_xticks(range(len(df.columns)))
+        plt.gca().set_xticklabels(columns, rotation=75, ha="right", fontsize=fontsize_columns)
+    else:
+        plt.gca().set_xticklabels([])
+    if show_row_label:
+        rows = df.index
+        if label_function is not None:
+            rows = [label_function(label) for label in df.index.values]
+        plt.gca().set_yticks(range(len(df.index)))
+        plt.gca().set_yticklabels(rows, rotation=75, ha="right", fontsize=fontsize_rows)
+    else:
+        plt.gca().set_yticklabels([])
+    #  set the title
+>>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
     if title is not None:
         plt.title(title, fontsize=fontsize_title)
     plt.tight_layout()
@@ -428,9 +457,11 @@ def generate_heatmap_simple_figure(
     return f
 
 
-def generate_dr_plot(df,
+def generate_dr_plot(
+    df,
     title=None,
-    class_label_column='class_labels',
+    class_label_column=None,
+    label_function=lambda x:x,
     **params):
     """
     This assumes that self.transformed_matrix is an array-like object with shape (n_samples, n_components)
@@ -511,7 +542,7 @@ def generate_dr_plot(df,
     if show_names:
         for i, row in df.iterrows():
             plt.annotate(
-                row['labels'],
+                label_function(row['labels']),
                 xy=(row[columns_to_use[0]], row[columns_to_use[1]]), xytext=(-1, 1),
                 textcoords='offset points', ha='right', va='bottom', size=8)
     return f

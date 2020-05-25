@@ -68,7 +68,7 @@ class ClusterAnnotator(mbf_genomics.annotator.Annotator):
                 {
                     self.column_name: [
                         self.clustering.clusters[stable_id]
-                        for stable_id in genes.df["stable_id"]
+                        for stable_id in genes.df["gene_stable_id"]
                     ]
                 }
             )
@@ -165,7 +165,7 @@ class MDF(object):
         genes_or_df_or_loading_function,
         columns=None,
         rows=None,
-        index_column=None,
+        index_column="gene_stable_id",
         dependencies=[],
         annotators=[],
         **kwargs,
@@ -258,7 +258,7 @@ class MDF(object):
                 self.df_or_gene_or_loading_function, mbf_genomics.genes.Genes
             ):
                 df = self.df_or_gene_or_loading_function.df
-                df.index = df["gene_stable_id"]
+                df.index = df[self.index_column]
             elif isinstance(self.df_or_gene_or_loading_function, pd.DataFrame):
                 df = self.df_or_gene_or_loading_function
             elif callable(self.df_or_gene_or_loading_function):
@@ -441,11 +441,11 @@ class MDF(object):
                     elif isinstance(by, list):
                         if not all([isinstance(b, str) for b in by]):
                             raise ValueError(
-                                f"Value to sort by must be either str or list of str but contained {[type(b) for b in by]}"
+                                f"Value to sort by must be either str or list of str but contained {[type(b) for b in by]}."
                             )
                     else:
                         raise ValueError(
-                            f"Value to sort by must be either str or list of str, was {type(by)}"
+                            f"Value to sort by must be either str or list of str, was {type(by)}."
                         )
                     if ax == 0:
                         tmp_cols = []
@@ -457,10 +457,10 @@ class MDF(object):
                                 except KeyError:
                                     if col in df_meta_columns.columns:
                                         raise KeyError(
-                                            "You are trying to sort rows by a row name : {col}"
+                                            "You are trying to sort rows by a row name : {col}."
                                         )
                                     else:
-                                        raise KeyError("Unknown column : {col}")
+                                        raise KeyError(f"Unknown column : {col}.")
                         assert df_scaled.index.equals(df_meta_rows.index)
                         df_scaled = df_scaled.sort_values(by=by, axis=ax, ascending=ac)
                         df_meta_rows = df_meta_rows.loc[df_scaled.index]
@@ -563,7 +563,6 @@ class MDF(object):
                     positional = []
                     keyargs = {}
                     for item in transformation[1:]:
-                        print(item)
                         if isinstance(item, list):
                             positional.extend(item)
                         elif isinstance(item, dict):
@@ -658,7 +657,7 @@ class MDF(object):
                 else:
 
                     def transformation_call(df, df_meta_rows, df_meta_columns, modify):
-                        indices = np.array([0, 1, 2])[[modify]]
+                        indices = np.array([i for i, mod in enumerate(modify) if mod])
                         dfs = [df, df_meta_rows, df_meta_columns]
                         params = []
                         sig = signature(transformation)
@@ -693,12 +692,17 @@ class MDF(object):
 
                 def transformation_call(df, df_meta_rows, df_meta_columns, modify):
                     dfs = [df, df_meta_rows, df_meta_columns]
-                    for i, mod in enumerate(modify):
-                        df = dfs[i]
-                        if mod:
-                            func = getattr(df, transformation[0])
-                            dfs[i] = func(*transformation[1], **transformation[2])
-
+                    for i, df in enumerate(dfs):
+                        if modify[i]:
+                            try:
+                                if i == 2:
+                                    func = getattr(df.transpose(), transformation[0])
+                                    dfs[i] = func(*transformation[1], **transformation[2]).transpose()
+                                else:
+                                    func = getattr(df, transformation[0])
+                                    dfs[i] = func(*transformation[1], **transformation[2])
+                            except:
+                                raise
                     return dfs[0], dfs[1], dfs[2]
 
             return transformation_call
@@ -745,6 +749,7 @@ class MDF(object):
             return attr_dict
 
         deps.append(ppg.FunctionInvariant(new_name + "_func", __scale))
+        deps.append(ppg.ParameterInvariant(new_name + "_PR", list(kwargs)))
         return MDF(
             new_name,
             __scale,
@@ -984,9 +989,6 @@ class MDF(object):
         return (
             ppg.FileGeneratingJob(outfile, __write)
             .depends_on(self.load())
-            .depends_on(
-                ppg.ParameterInvariant(f"PI_{outfile}", [index, full, self.name])
-            )
         )
 
     def write_excel(self, filename=None, index=False, full=True):
@@ -1030,7 +1032,6 @@ class MDF(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
-
         def __plot():
             df = self.df
             if df.shape[0] == 0 or df.shape[1] == 0:
@@ -1063,6 +1064,9 @@ class MDF(object):
         legend_location=None,
         show_column_label=True,
         show_row_label=True,
+        label_function=None,
+        row_label_column=None,
+        column_label_row=None,
         dependencies=[],
         **params,
     ):
@@ -1072,7 +1076,12 @@ class MDF(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
+<<<<<<< HEAD
         
+=======
+        if label_function is None:
+            label_function = lambda x:x
+>>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
         def __plot():
             df = self.df
             if not (df.shape[0] == 0 or df.shape[1] == 0):
@@ -1099,7 +1108,29 @@ class MDF(object):
                     else:
                         raise err
             else:
+<<<<<<< HEAD
                 plots.plot_empty(outfile)
+=======
+                if row_label_column is not None:
+                    df.index = self.df_meta_rows[row_label_column]
+                if column_label_row is not None:
+                    df.columns = self.df_meta_columns[column_label_row]
+                figure = plots.generate_heatmap_figure(
+                    df,
+                    label_function,
+                    title,
+                    display_linkage_column=display_linkage_column,
+                    display_linkage_row=display_linkage_row,
+                    legend_location=legend_location,
+                    show_column_label=show_column_label,
+                    show_row_label=show_row_label,
+                    **params,
+                )
+                #    max_inches_to_plot = 60000 / (2*dpi)
+                #    if inches_top+inches_bottom >= max_inches_to_plot:
+                #    raise ValueError("The figure you are trying to plot is too large.")
+                figure.savefig(outfile)
+>>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
         params_job = ppg.ParameterInvariant(
@@ -1130,6 +1161,7 @@ class MDF(object):
         legend_location=None,
         show_column_label=True,
         show_row_label=True,
+        label_function=None,
         dependencies=[],
         **params,
     ):
@@ -1143,6 +1175,8 @@ class MDF(object):
         outf.parent.mkdir(parents=True, exist_ok=True)
         if outf.name.endswith("png"):
             raise ValueError("Output format for multipage plot must be pdf.")
+        if label_function is None:
+            label_function = lambda x:x
 
         def __plot():
             dpi = params.get("dpi", 300)
@@ -1164,6 +1198,7 @@ class MDF(object):
                     df_sub = df.loc[fro:to]
                     fig = plots.generate_heatmap_figure(
                         df_sub,
+                        label_function,
                         title,
                         display_linkage_column=display_linkage_column,
                         display_linkage_row=display_linkage_row,
@@ -1200,6 +1235,7 @@ class MDF(object):
         title=None,
         class_label_column=None,
         show_names=False,
+        label_function=None,
         dependencies=[],
         **params,
     ):
@@ -1210,7 +1246,8 @@ class MDF(object):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
         row_labels = params.get("label_dict", None)
-
+        if label_function is None:
+            label_function = lambda x:x
         def __plot():
             df = self.df
             dim = params.get("dimension", 2)
@@ -1241,6 +1278,7 @@ class MDF(object):
                     df,
                     title,
                     class_label_column,
+                    label_function,
                     xlabel=xlabel,
                     ylabel=ylabel,
                     show_names=show_names,
