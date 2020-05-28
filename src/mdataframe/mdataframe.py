@@ -1021,6 +1021,7 @@ class MDF(object):
         show_column_label=True,
         title=None,
         dependencies=[],
+        label_function=None,
         **params,
     ):
 
@@ -1032,6 +1033,7 @@ class MDF(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
+
         def __plot():
             df = self.df
             if df.shape[0] == 0 or df.shape[1] == 0:
@@ -1040,7 +1042,8 @@ class MDF(object):
                 fig.savefig(outfile)
             else:
                 figure = plots.generate_heatmap_simple_figure(
-                    df, title, show_column_label=show_column_label, **params
+                    df, title, label_function=label_function,
+                    show_column_label=show_column_label, **params
                 )
                 figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
@@ -1048,7 +1051,7 @@ class MDF(object):
         params_job = ppg.ParameterInvariant(
             outfile.name + "_label_nice", list(params) + [title, show_column_label]
         )
-
+        deps.append(ppg.FunctionInvariant(f"FI_{str(outfile)}", plots.generate_heatmap_simple_figure))
         return (
             ppg.FileGeneratingJob(outfile, __plot)
             .depends_on(deps)
@@ -1076,49 +1079,21 @@ class MDF(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
-<<<<<<< HEAD
-        
-=======
-        if label_function is None:
-            label_function = lambda x:x
->>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
         def __plot():
             df = self.df
-            if not (df.shape[0] == 0 or df.shape[1] == 0):
-                try:
-                    figure = plots.generate_heatmap_figure(
-                        df,
-                        title,
-                        display_linkage_column=display_linkage_column,
-                        display_linkage_row=display_linkage_row,
-                        legend_location=legend_location,
-                        show_column_label=show_column_label,
-                        show_row_label=show_row_label,
-                        **params,
-                    )
-                    figure.savefig(outfile)
-                except ValueError as err:
-                    msg = str(err)
-                    if msg.startswith("The number of pixels is too large"):
-                        import warnings
-                        warnings.warn(
-                            f"{msg} Empty plot written."
-                            )
-                        plots.plot_empty(outfile, msg.split(",")[0])
-                    else:
-                        raise err
+            if df.shape[0] == 0 or df.shape[1] == 0:
+                fig = plt.figure()
+                plt.text(1, 1, "Empty DataFrame")
+                fig.savefig(outfile)
             else:
-<<<<<<< HEAD
-                plots.plot_empty(outfile)
-=======
                 if row_label_column is not None:
                     df.index = self.df_meta_rows[row_label_column]
                 if column_label_row is not None:
                     df.columns = self.df_meta_columns[column_label_row]
                 figure = plots.generate_heatmap_figure(
                     df,
-                    label_function,
                     title,
+                    label_function,
                     display_linkage_column=display_linkage_column,
                     display_linkage_row=display_linkage_row,
                     legend_location=legend_location,
@@ -1126,12 +1101,9 @@ class MDF(object):
                     show_row_label=show_row_label,
                     **params,
                 )
-                #    max_inches_to_plot = 60000 / (2*dpi)
-                #    if inches_top+inches_bottom >= max_inches_to_plot:
-                #    raise ValueError("The figure you are trying to plot is too large.")
                 figure.savefig(outfile)
->>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
+
 
         params_job = ppg.ParameterInvariant(
             outfile.name + "_label_nice",
@@ -1237,6 +1209,7 @@ class MDF(object):
         show_names=False,
         label_function=None,
         dependencies=[],
+        model_name=None,
         **params,
     ):
         dependencies.append(self.load())
@@ -1269,11 +1242,12 @@ class MDF(object):
                     df["labels"] = tmp
                 xlabel = ""
                 ylabel = ""
-                if hasattr(self, model):
-                    model = getattr(self, model)
-                    if hasattr(model, "explained_variance_ratio"):
-                        xlabel = f" ({model.explained_variance_ratio[0]*100:.2f}%)"
-                        ylabel = f" ({model.explained_variance_ratio[1]*100:.2f}%)"
+                if model_name is not None:
+                    if hasattr(self, model_name):
+                        model = getattr(self, model_name)
+                        if hasattr(model, "explained_variance_ratio"):
+                            xlabel = f" ({model.explained_variance_ratio[0]*100:.2f}%)"
+                            ylabel = f" ({model.explained_variance_ratio[1]*100:.2f}%)"
                 figure = plots.generate_dr_plot(
                     df,
                     title,
@@ -1291,11 +1265,18 @@ class MDF(object):
                 fig.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
-        params_job = ppg.ParameterInvariant(
-            outfile.name + "_2d", list(params) + [title,],
+        dependencies.append(
+            ppg.ParameterInvariant(
+                outfile.name + "_2d", list(params) + [title, class_label_column, show_names, model_name],
+            )
         )
+        dependencies.append(
+            ppg.FunctionInvariant(
+                "FI_label_function", label_function
+            )
+        )
+
         return (
             ppg.FileGeneratingJob(outfile, __plot)
             .depends_on(dependencies)
-            .depends_on(params_job)
         )

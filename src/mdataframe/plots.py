@@ -10,10 +10,11 @@ import matplotlib.gridspec as grid
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from cycler import cycler
 
+
 def generate_heatmap_figure(
     df,
-    label_function=None,
     title=None,
+    label_function=None,
     display_linkage_column=None,
     display_linkage_row=None,
     legend_location=None,
@@ -143,9 +144,9 @@ def generate_heatmap_figure(
     if display_linkage_column is not None:
         ax_dendro_column = plt.subplot(
             gridspec[
-                start_dendro_top * rows_per_inch : start_dendro_top * rows_per_inch
+                start_dendro_top * rows_per_inch: start_dendro_top * rows_per_inch
                 + rows_per_inch * inch_for_dendro_top,
-                columns_per_inch * inches_left : len_x
+                columns_per_inch * inches_left: len_x
                 + columns_per_inch * inches_left,
             ]
         )
@@ -153,9 +154,9 @@ def generate_heatmap_figure(
     if display_linkage_row is not None:
         ax_dendro_row = plt.subplot(
             gridspec[
-                rows_per_inch * inches_top : len_y + rows_per_inch * inches_top,
+                rows_per_inch * inches_top: len_y + rows_per_inch * inches_top,
                 start_dendro_left
-                * columns_per_inch : start_dendro_left
+                * columns_per_inch: start_dendro_left
                 * columns_per_inch
                 + columns_per_inch * inch_for_dendro_left,
             ]
@@ -165,9 +166,9 @@ def generate_heatmap_figure(
         ax_labels_column = plt.subplot(
             gridspec[
                 rows_per_inch * (inches_top)
-                + len_y : rows_per_inch * (inches_top + inches_bottom)
+                + len_y: rows_per_inch * (inches_top + inches_bottom)
                 + len_y,
-                columns_per_inch * inches_left : len_x
+                columns_per_inch * inches_left: len_x
                 + columns_per_inch * inches_left,
             ]
         )
@@ -175,17 +176,17 @@ def generate_heatmap_figure(
     if show_row_label:
         ax_labels_row = plt.subplot(
             gridspec[
-                rows_per_inch * inches_top : len_y + rows_per_inch * inches_top,
+                rows_per_inch * inches_top: len_y + rows_per_inch * inches_top,
                 columns_per_inch * inches_left
-                + len_x : columns_per_inch * (inches_left + 1)
+                + len_x: columns_per_inch * (inches_left + 1)
                 + len_x,
             ]
         )
         axes.append(ax_labels_row)
     ax_matrix = plt.subplot(
         gridspec[
-            rows_per_inch * inches_top : len_y + rows_per_inch * inches_top,
-            columns_per_inch * inches_left : len_x + columns_per_inch * inches_left,
+            rows_per_inch * inches_top: len_y + rows_per_inch * inches_top,
+            columns_per_inch * inches_left: len_x + columns_per_inch * inches_left,
         ]
     )
 
@@ -205,10 +206,13 @@ def generate_heatmap_figure(
     norm = matplotlib.colors.Normalize(vmin, vmax)
 
     # add the labels
-    ax_matrix.set_yticklabels([label_function(label) for label in df.index.values], fontsize=fontsizey)
-    ax_matrix.set_xticklabels(
-        [label_function(label) for label in df.columns.values], rotation=75, ha="right", fontsize=fontsizex
-    )
+    rows = list(df.index.values)
+    columns = list(df.columns.values)
+    if label_function is not None:
+        rows = [label_function(label) for label in rows]
+        columns = [label_function(label) for label in columns]
+    ax_matrix.set_yticklabels(rows, fontsize=fontsizey)
+    ax_matrix.set_xticklabels(columns, rotation=75, ha="right", fontsize=fontsizex)
 
     # actually plot the heatmap
     im = ax_matrix.imshow(df, cmap=colormap, norm=norm, aspect=aspect)
@@ -230,8 +234,8 @@ def generate_heatmap_figure(
         if legend_location == "br" or legend_location == "rb":
             ax_color = plt.subplot(
                 gridspec[
-                    grid_y - rows_per_inch * inches_bottom : grid_y,
-                    grid_x - columns_per_inch * inches_right : grid_x,
+                    grid_y - rows_per_inch * inches_bottom: grid_y,
+                    grid_x - columns_per_inch * inches_right: grid_x,
                 ]
             )
             bounds = list(ax_color.get_position().bounds)
@@ -246,7 +250,7 @@ def generate_heatmap_figure(
         elif legend_location == "bl" or legend_location == "lb":
             ax_color = plt.subplot(
                 gridspec[
-                    grid_y - rows_per_inch * inches_bottom : grid_y,
+                    grid_y - rows_per_inch * inches_bottom: grid_y,
                     0:columns_per_inch,
                 ]
             )
@@ -264,7 +268,7 @@ def generate_heatmap_figure(
             ax_color = plt.subplot(
                 gridspec[
                     0:rows_per_inch,
-                    grid_x - columns_per_inch * inches_right : grid_x,
+                    grid_x - columns_per_inch * inches_right: grid_x,
                 ]
             )
             bounds = list(ax_color.get_position().bounds)
@@ -290,8 +294,8 @@ def generate_heatmap_figure(
         elif legend_location == "r":
             ax_color = plt.subplot(
                 gridspec[
-                    rows_per_inch * inches_top : len_y + rows_per_inch * inches_top,
-                    grid_x - columns_per_inch : grid_x,
+                    rows_per_inch * inches_top: len_y + rows_per_inch * inches_top,
+                    grid_x - columns_per_inch: grid_x,
                 ]
             )
             bounds = list(ax_color.get_position().bounds)
@@ -303,7 +307,7 @@ def generate_heatmap_figure(
         elif legend_location == "l":
             ax_color = plt.subplot(
                 gridspec[
-                    rows_per_inch * inches_top : len_y + rows_per_inch * inches_top,
+                    rows_per_inch * inches_top: len_y + rows_per_inch * inches_top,
                     0:columns_per_inch,
                 ]
             )
@@ -317,7 +321,7 @@ def generate_heatmap_figure(
             ax_color = plt.subplot(
                 gridspec[
                     0:rows_per_inch,
-                    columns_per_inch * inches_left : len_x
+                    columns_per_inch * inches_left: len_x
                     + columns_per_inch * inches_left,
                 ]
             )
@@ -332,8 +336,8 @@ def generate_heatmap_figure(
         elif legend_location == "b":
             ax_color = plt.subplot(
                 gridspec[
-                    grid_y - rows_per_inch : grid_y,
-                    columns_per_inch * inches_left : len_x
+                    grid_y - rows_per_inch: grid_y,
+                    columns_per_inch * inches_left: len_x
                     + columns_per_inch * inches_left,
                 ]
             )
@@ -401,15 +405,12 @@ def generate_heatmap_simple_figure(
     fontsize_columns = params.get("fontsize_column", 12)
     fontsize_rows = params.get("fontsize_rows", 12)
     dpi = params.get("dpi", 150)
-<<<<<<< HEAD
     fig_x = params.get("fig_x", df.shape[1])
-    fig_y = params.get("fig_y", len(df)*4/dpi)
-    shrink = params.get("shrink", .05)
-=======
-    fig_x = params.get("fig_x", 20)
-    fig_y = params.get("fig_y", 20)
-    shrink = params.get("shrink", 1)
->>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
+    fig_y = params.get("fig_y", max(10, len(df)*4/dpi))
+    guess_shrink = .5
+    if fig_y > 30:
+        guess_shrink = .1
+    shrink = params.get("shrink", guess_shrink)
     f = plt.figure(
         figsize=(fig_x, fig_y), dpi=dpi, frameon=True, edgecolor="k", linewidth=2
     )
@@ -420,17 +421,6 @@ def generate_heatmap_simple_figure(
     norm = matplotlib.colors.Normalize(vmin, vmax)
     im = plt.gca().imshow(df, cmap=colormap, norm=norm, aspect=aspect)
     plt.colorbar(im, shrink=shrink)
-<<<<<<< HEAD
-    # add the labels
-    if show_column_label:
-        plt.gca().set_xticks(range(len(df.columns)))
-        plt.gca().set_xticklabels(df.columns.values, rotation=75, ha="right", fontsize=fontsize_columns)
-    if show_row_label:
-        plt.gca().set_yticks(range(len(df.index)))
-        plt.gca().set_yticklabels(df.index.values, rotation=75, ha="right", fontsize=fontsize_rows)
-    plt.gca().set_yticklabels([])
-    # set the title
-=======
     #  add the labels
     if show_column_label:
         columns = df.columns.values
@@ -445,14 +435,13 @@ def generate_heatmap_simple_figure(
         if label_function is not None:
             rows = [label_function(label) for label in df.index.values]
         plt.gca().set_yticks(range(len(df.index)))
-        plt.gca().set_yticklabels(rows, rotation=75, ha="right", fontsize=fontsize_rows)
+        plt.gca().set_yticklabels(rows, ha="right", fontsize=fontsize_rows)
     else:
         plt.gca().set_yticklabels([])
     #  set the title
->>>>>>> 3500cbccf9f1b17b28bcd79c9a5fd6deff867647
     if title is not None:
         plt.title(title, fontsize=fontsize_title)
-    plt.tight_layout()
+    plt.tight_layout(pad=1, w_pad=1, h_pad=1)
     plt.close()
     return f
 
