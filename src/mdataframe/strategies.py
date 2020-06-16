@@ -37,7 +37,7 @@ class DimensionalityReduction:
         self.__invariants = invariants
         self.__dimensions = dimensions
         self.__transformer = None
-
+    
     @property
     def dimensions(self):
         return self.__dimensions

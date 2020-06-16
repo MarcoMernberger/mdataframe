@@ -894,7 +894,7 @@ class MDF(object):
             ),
             ppg.FunctionInvariant(new_name + "_func", strategy.fit),
         ]
-        new_index = [f"Dim {i+1}" for i in range(strategy.dimensions)]
+        new_index = [f"{strategy.name} {i+1}" for i in range(strategy.dimensions)]
         new_resdir = self.result_dir.parent / new_name
 
         def __do_reduce():
