@@ -404,7 +404,7 @@ def generate_heatmap_simple_figure(
     fontsize_title = params.get("fontsize_title", 12)
     fontsize_columns = params.get("fontsize_column", 12)
     fontsize_rows = params.get("fontsize_rows", 12)
-    dpi = params.get("dpi", 150)
+    dpi = params.get("dpi", 100)
     fig_x = params.get("fig_x", df.shape[1])
     fig_y = params.get("fig_y", max(10, len(df)*4/dpi))
     guess_shrink = .5
@@ -460,7 +460,7 @@ def generate_dr_plot(
     show_names = params.get("show_names", False)
     x_suffix = params.get("xlabel", "")
     y_suffix = params.get("ylabel", "")
-    dpi = params.get("dpi", 300)
+    dpi = params.get("dpi", 100)
     fig_x = params.get("fig_x", 8)
     fig_y = params.get("fig_y", 8)
     f = plt.figure(

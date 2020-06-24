@@ -9,6 +9,7 @@ from pathlib import Path
 from inspect import signature
 from . import plots
 from . import strategies
+from mplots import MPPlotJob
 import matplotlib
 matplotlib.use("agg")
 import pypipegraph as ppg
@@ -237,13 +238,8 @@ class MDF(object):
             ppg.ParameterInvariant(self.name + "_kwargs", list(kwargs),)
         )
 
-    def __register_attribute():
-        pass
-
-    def register_synonym():
-        pass
-
     def __getattr__(self, name):
+
         def method(*args):
             return self.transform(name, *args)
 
@@ -1033,30 +1029,37 @@ class MDF(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
+        outfiles = [outfile, outfile.with_suffix(".svg")]
 
-        def __plot():
+        def __calc():
             df = self.df
+            return df
+
+        def __plot(df):
             if df.shape[0] == 0 or df.shape[1] == 0:
-                fig = plt.figure()
+                figure = plt.figure()
                 plt.text(1, 1, "Empty DataFrame")
-                fig.savefig(outfile)
             else:
                 figure = plots.generate_heatmap_simple_figure(
                     df, title, label_function=label_function,
                     show_column_label=show_column_label, **params
                 )
-                figure.savefig(outfile)
-            df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
+            return figure
 
         params_job = ppg.ParameterInvariant(
             outfile.name + "_label_nice", list(params) + [title, show_column_label]
         )
         deps.append(ppg.FunctionInvariant(f"FI_{str(outfile)}", plots.generate_heatmap_simple_figure))
-        return (
-            ppg.FileGeneratingJob(outfile, __plot)
-            .depends_on(deps)
-            .depends_on(params_job)
-        )
+        job = MPPlotJob(outfiles[0], __calc, __plot)
+        job.depends_on(deps)
+        job.depends_on(params_job)
+        return job
+
+#        return (
+#            ppg.MultiFileGeneratingJob(outfiles, __plot)
+#            .depends_on(deps)
+#            .depends_on(params_job)
+#        )
 
     def plot_singlepage(
         self,
@@ -1221,30 +1224,37 @@ class MDF(object):
         row_labels = params.get("label_dict", None)
         if label_function is None:
             label_function = lambda x:x
-        def __plot():
+        outfiles = [outfile, outfile.with_suffix(".svg")]
+        dim = params.get("dimension", 2)
+
+        def __calc():
             df = self.df
-            dim = params.get("dimension", 2)
-            model = params.get("model", "last_model")
+            if class_label_column is not None:
+                if not class_label_column in self.df_meta_rows.columns:
+                    raise ValueError(
+                        f"No class label column {class_label_column} in df_meta_rows."
+                    )
+                else:
+                    df[class_label_column] = self.df_meta_rows[
+                        class_label_column
+                    ].values
+            if row_labels is not None:
+                tmp = []
+                for i in df.index:
+                    tmp.append(row_labels[i])
+                df["labels"] = tmp
+            return df
+
+        def __plot(df):
             if len(df) > 0 and df.shape[1] > dim:
-                if class_label_column is not None:
-                    if not class_label_column in self.df_meta_rows.columns:
-                        raise ValueError(
-                            f"No class label column {class_label_column} in df_meta_rows."
-                        )
-                    else:
-                        df[class_label_column] = self.df_meta_rows[
-                            class_label_column
-                        ].values
-                if row_labels is not None:
-                    tmp = []
-                    for i in df.index:
-                        tmp.append(row_labels[i])
-                    df["labels"] = tmp
                 xlabel = ""
                 ylabel = ""
                 if model_name is not None:
                     if hasattr(self, model_name):
                         model = getattr(self, model_name)
+                        print(model)
+                        print(type(model))
+                        print(hasattr(model, "explained_variance_ratio"))
                         if hasattr(model, "explained_variance_ratio"):
                             xlabel = f" ({model.explained_variance_ratio[0]*100:.2f}%)"
                             ylabel = f" ({model.explained_variance_ratio[1]*100:.2f}%)"
@@ -1258,13 +1268,11 @@ class MDF(object):
                     show_names=show_names,
                     **params,
                 )
-                figure.savefig(outfile)
             else:
-                fig = plt.figure()
+                figure = plt.figure()
                 plt.text(1, 1, "Empty DataFrame")
-                fig.savefig(outfile)
-            df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
-
+            return figure
+                
         dependencies.append(
             ppg.ParameterInvariant(
                 outfile.name + "_2d", list(params) + [title, class_label_column, show_names, model_name],
@@ -1275,8 +1283,9 @@ class MDF(object):
                 "FI_label_function", label_function
             )
         )
-
-        return (
-            ppg.FileGeneratingJob(outfile, __plot)
-            .depends_on(dependencies)
-        )
+        job = MPPlotJob(outfiles[0], __calc, __plot)
+        job.plot_depends_on(dependencies)
+        for of in outfiles[1:]:
+            job.add_another_plot(of, __plot)
+        job.depends_on(dependencies)
+        return job
