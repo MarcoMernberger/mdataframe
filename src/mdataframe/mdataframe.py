@@ -1223,7 +1223,7 @@ class MDF(object):
         outfile.parent.mkdir(parents=True, exist_ok=True)
         row_labels = params.get("label_dict", None)
         if label_function is None:
-            label_function = lambda x:x
+            label_function = lambda x: x
         outfiles = [outfile, outfile.with_suffix(".svg")]
         dim = params.get("dimension", 2)
 
@@ -1256,8 +1256,8 @@ class MDF(object):
                         print(type(model))
                         print(hasattr(model, "explained_variance_ratio"))
                         if hasattr(model, "explained_variance_ratio"):
-                            xlabel = f" ({model.explained_variance_ratio[0]*100:.2f}%)"
-                            ylabel = f" ({model.explained_variance_ratio[1]*100:.2f}%)"
+                            xlabel = f" ({model.explained_variance_ratio[0]*100:.2f}%) expl. variance"
+                            ylabel = f" ({model.explained_variance_ratio[1]*100:.2f}%) expl. variance"
                 figure = plots.generate_dr_plot(
                     df,
                     title,
