@@ -66,7 +66,7 @@ class SklearnPCA(DimensionalityReduction):
         ]
         super().__init__(name, dimensions, invariants)
         self.__transformer = sklearnPCA(
-            n_components = self.dimensions, 
+            n_components = self.dimensions,
             copy=True, 
             whiten=self.__whiten, 
             svd_solver='auto', 
@@ -141,7 +141,6 @@ class NewKMeans(ClusteringMethod):
         n_init=10,
         max_iter=300,
         random_state=None,
-        n_jobs=1,
         init="k-means++",
     ):
         """
@@ -155,12 +154,10 @@ class NewKMeans(ClusteringMethod):
         self.__n_init = n_init
         self.__max_iter = max_iter
         self.__random_state = random_state
-        self.__n_jobs = n_jobs
         self.__init = init
         invariants = [
             self.__no_of_clusters,
             self.__init,
-            self.__n_jobs,
             self.__random_state,
             self.__max_iter,
             self.__n_init,
@@ -173,11 +170,9 @@ class NewKMeans(ClusteringMethod):
             max_iter=self.__max_iter,
             algorithm="auto",
             tol=0.0001,
-            precompute_distances="auto",
             verbose=0,
             random_state=self.__random_state,
             copy_x=True,
-            n_jobs=self.__n_jobs,
         )
 
     @property
@@ -187,6 +182,7 @@ class NewKMeans(ClusteringMethod):
     @property
     def no_of_clusters(self):
         return self.__no_of_clusters
+
 
 class ClassLabel(ClusteringMethod):
     def __init__(
