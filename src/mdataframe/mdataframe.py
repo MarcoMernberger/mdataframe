@@ -11,9 +11,10 @@ from . import plots
 from . import strategies
 from mplots import MPPlotJob
 import matplotlib
+
 matplotlib.use("agg")
 import pypipegraph as ppg
-import mbf_genomics
+import mbf.genomics
 import copy
 import os
 import itertools
@@ -32,6 +33,7 @@ import functools
 import collections
 import warnings
 
+
 def equality_of_function(func1, func2):
     eq_bytecode = func1.__code__.co_code == func1.__code__.co_code
     eq_closure = func1.__closure__ == func1.__closure__
@@ -44,7 +46,7 @@ def equality_of_function(func1, func2):
 warnings.simplefilter("always", UserWarning)
 
 
-class ClusterAnnotator(mbf_genomics.annotator.Annotator):
+class ClusterAnnotator(mbf.genomics.annotator.Annotator):
     def __init__(self, clustering):
         self.clustering = clustering
         self.column_name = "clustered_by_%s" % self.clustering.name
@@ -54,7 +56,7 @@ class ClusterAnnotator(mbf_genomics.annotator.Annotator):
                 "description": "The flat cluster obtained for the gene based on a given clustering."
             }
         }
-        mbf_genomics.annotator.Annotator.__init__(self)
+        mbf.genomics.annotator.Annotator.__init__(self)
 
     def get_dependencies(self, genomic_regions):
         return [genomic_regions.load(), self.clustering.cluster()]
@@ -128,9 +130,7 @@ class TransformScaler(Transformer):
     def __init__(self, name, transformation_function):
         super().__init__(name)
         if not hasattr(transformation_function, "__call__"):
-            raise ValueError(
-                "Transformation function was not a callable for {}.".format(self.name)
-            )
+            raise ValueError("Transformation function was not a callable for {}.".format(self.name))
         self.transformation_function = transformation_function
 
     def transform(self, data):
@@ -177,8 +177,8 @@ class MDF(object):
         @genes_or_df_or_loading_function Dataframe or GenomicRegion containing 2-dimensional data
         @dependencies dependencies
         @annotators annotators to be added to the genomics.genes.Genes object, if given.
-        
-        imputation, scaling, transformation and clustering is modeled as functions on MDF that return a transformed MDF and work on the 
+
+        imputation, scaling, transformation and clustering is modeled as functions on MDF that return a transformed MDF and work on the
         relevant part of the dataframe
         """
         self.name = name
@@ -200,21 +200,15 @@ class MDF(object):
             else:
                 self.result_dir = Path("results") / "MDF" / self.name
         self.result_dir.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(
-            self.df_or_gene_or_loading_function, mbf_genomics.regions.GenomicRegions
-        ):
+        if isinstance(self.df_or_gene_or_loading_function, mbf.genomics.regions.GenomicRegions):
             self.dependencies.append(self.df_or_gene_or_loading_function.load())
             self.annotators = annotators
             anno_names = []
             for anno in self.annotators:
                 anno_names.extend(list(anno.columns))
-                self.dependencies.append(
-                    self.df_or_gene_or_loading_function.add_annotator(anno)
-                )  #
+                self.dependencies.append(self.df_or_gene_or_loading_function.add_annotator(anno))  #
             self.dependencies.append(
-                ppg.ParameterInvariant(
-                    self.name + "_anno_parameter_invariant", [anno_names]
-                )
+                ppg.ParameterInvariant(self.name + "_anno_parameter_invariant", [anno_names])
             )
         elif isinstance(self.df_or_gene_or_loading_function, pd.DataFrame):
             self.dependencies.append(
@@ -227,19 +221,17 @@ class MDF(object):
                     ],
                 )
             )
-        self.dependencies.append(
-            ppg.ParameterInvariant(self.name + "_columns", self.columns)
-        )
+        self.dependencies.append(ppg.ParameterInvariant(self.name + "_columns", self.columns))
         self.dependencies.append(ppg.ParameterInvariant(self.name + "_rows", self.rows))
+        self.dependencies.append(ppg.ParameterInvariant(self.name + "_rowid", self.index_column))
         self.dependencies.append(
-            ppg.ParameterInvariant(self.name + "_rowid", self.index_column)
-        )
-        self.dependencies.append(
-            ppg.ParameterInvariant(self.name + "_kwargs", list(kwargs),)
+            ppg.ParameterInvariant(
+                self.name + "_kwargs",
+                list(kwargs),
+            )
         )
 
     def __getattr__(self, name):
-
         def method(*args):
             return self.transform(name, *args)
 
@@ -250,9 +242,7 @@ class MDF(object):
 
         def __calc():
             dictionary_with_attributes = {}
-            if isinstance(
-                self.df_or_gene_or_loading_function, mbf_genomics.genes.Genes
-            ):
+            if isinstance(self.df_or_gene_or_loading_function, mbf.genomics.genes.Genes):
                 df = self.df_or_gene_or_loading_function.df
                 df.index = df[self.index_column]
             elif isinstance(self.df_or_gene_or_loading_function, pd.DataFrame):
@@ -292,9 +282,7 @@ class MDF(object):
             df_meta_rows = df.copy()
             df_meta_rows = df_meta_rows[additional_columns]
             if "df_meta_rows" in dictionary_with_attributes:
-                df_meta_rows = df_meta_rows.join(
-                    dictionary_with_attributes["df_meta_rows"]
-                )
+                df_meta_rows = df_meta_rows.join(dictionary_with_attributes["df_meta_rows"])
             df_meta_rows = df_meta_rows.loc[self.rows]
             dictionary_with_attributes["df_meta_rows"] = df_meta_rows
             df_meta_columns = df.copy().transpose()
@@ -334,13 +322,13 @@ class MDF(object):
         """
         We want to be able to sort by row or column --> need by, axis and ascending
         to supply a function that can be applied on the dataframe
-        to apply mulitple sortings in order given --> 
+        to apply mulitple sortings in order given -->
         sort(column1, axis1, ascending1, column2, column3) --> this will apply the sortings separately after one another
         sort([column1, column2], [ascending1, ascending2], axis) --> this will apply the sorting simultaneously
         each string is a column/row to sort "by"
         each int is an "axis" referring to the previous "by"
         optionally bool is an "ascending" for the previous "by"
-        multiple lists can be lists of columns/rows, optionally followed by int and bool lists and are applied simultanouesly, so you get a prioritized ordering 
+        multiple lists can be lists of columns/rows, optionally followed by int and bool lists and are applied simultanouesly, so you get a prioritized ordering
         multiple lists can also contain [by, axis, ascending] and are applied consecutively.
         """
         new_name = self.name
@@ -418,9 +406,7 @@ class MDF(object):
 
         for sort in sorts:
             if isinstance(sort, list):
-                deps.append(
-                    ppg.ParameterInvariant(f"{new_name}_PI{str(sort[1])}", sort[1:])
-                )
+                deps.append(ppg.ParameterInvariant(f"{new_name}_PI{str(sort[1])}", sort[1:]))
         deps.extend(self.get_dependencies() + [self.load()])
 
         def __scale():
@@ -508,9 +494,7 @@ class MDF(object):
         transforms = []
         for transformation in transformations:
             if callable(transformation):
-                transformation_name = transformation.__name__.replace(">", "").replace(
-                    "<", ""
-                )
+                transformation_name = transformation.__name__.replace(">", "").replace("<", "")
                 transforms.append((0, transformation))
                 deps.append(
                     ppg.FunctionInvariant(
@@ -543,15 +527,11 @@ class MDF(object):
                     transforms.append((1, transformation))
                     transformation_name = transformation
                     deps.append(
-                        ppg.ParameterInvariant(
-                            f"{new_name}_PI_{transformation}", [transformation]
-                        )
+                        ppg.ParameterInvariant(f"{new_name}_PI_{transformation}", [transformation])
                     )
                 else:
                     raise ValueError(
-                        "Don't know how to apply this transformation: {}.".format(
-                            transformation
-                        )
+                        "Don't know how to apply this transformation: {}.".format(transformation)
                     )
             elif isinstance(transformation, list):
                 if hasattr(pd.DataFrame, transformation[0]):
@@ -567,9 +547,7 @@ class MDF(object):
                             positional.append(item)
                     transforms.append((2, [transformation[0], positional, keyargs]))
                     deps.append(
-                        ppg.ParameterInvariant(
-                            f"{new_name}_PI_{transformation[0]}", transformation
-                        )
+                        ppg.ParameterInvariant(f"{new_name}_PI_{transformation[0]}", transformation)
                     )
                 else:
                     raise ValueError(
@@ -593,11 +571,7 @@ class MDF(object):
                 func = transformation["func"]
                 del transformation["func"]
                 transforms.append((2, [func, [], transformation]))
-                deps.append(
-                    ppg.ParameterInvariant(
-                        f"{new_name}_PI_{func}", list(transformation)
-                    )
-                )
+                deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{func}", list(transformation)))
             else:
                 raise ValueError(
                     "{} did not have a name or callable transformation function named 'transform' and is not a valid method on pandas.DataFrame.".format(
@@ -641,13 +615,9 @@ class MDF(object):
 
                     def transformation_call(df, df_meta_rows, df_meta_columns, modify):
                         if modify[0]:
-                            df = (
-                                df.transpose().apply(transformation, axis=0).transpose()
-                            )
+                            df = df.transpose().apply(transformation, axis=0).transpose()
                         if modify[2]:
-                            df_meta_columns = df_meta_columns.apply(
-                                transformation, axis=0
-                            )
+                            df_meta_columns = df_meta_columns.apply(transformation, axis=0)
                         return df, df_meta_rows, df_meta_columns
 
                 else:
@@ -693,7 +663,9 @@ class MDF(object):
                             try:
                                 if i == 2:
                                     func = getattr(df.transpose(), transformation[0])
-                                    dfs[i] = func(*transformation[1], **transformation[2]).transpose()
+                                    dfs[i] = func(
+                                        *transformation[1], **transformation[2]
+                                    ).transpose()
                                 else:
                                     func = getattr(df, transformation[0])
                                     dfs[i] = func(*transformation[1], **transformation[2])
@@ -708,9 +680,7 @@ class MDF(object):
             df_meta_rows = self.df_meta_rows.copy()
             df_meta_columns = self.df_meta_columns.copy()
             for ttype, transformation in transforms:
-                transformation_callable = get_transformation_callable(
-                    ttype, axis, transformation
-                )
+                transformation_callable = get_transformation_callable(ttype, axis, transformation)
                 df_scaled, df_meta_rows, df_meta_columns = transformation_callable(
                     df_scaled, df_meta_rows, df_meta_columns, modify
                 )
@@ -783,9 +753,7 @@ class MDF(object):
     def impute(self, *transformations, axis=1):
 
         if len(transformations) == 0:
-            return self.transform(
-                ImputeFixed(missing_value=np.NaN, replacement_value=0)
-            )
+            return self.transform(ImputeFixed(missing_value=np.NaN, replacement_value=0))
 
         return self.transform(*transformations, axis=1)
 
@@ -831,9 +799,7 @@ class MDF(object):
                 if axis == 0:
                     # cluster columns
                     df_meta_columns = df_meta_columns.join(strategy.clusters)
-                    df_meta_columns[strategy.name] = df_meta_columns[
-                        strategy.name
-                    ].fillna(-1)
+                    df_meta_columns[strategy.name] = df_meta_columns[strategy.name].fillna(-1)
                     df = df.transpose()
                 else:
                     # cluster rows
@@ -923,9 +889,7 @@ class MDF(object):
                     df_meta_rows = pd.DataFrame({}, index=df.index)
                 else:
                     # rows are data points
-                    df = pd.DataFrame(
-                        strategy.reduced_matrix, index=df.index, columns=new_index
-                    )
+                    df = pd.DataFrame(strategy.reduced_matrix, index=df.index, columns=new_index)
                     df_meta_columns = pd.DataFrame({}, index=df.index.columns)
             rows = df.index.values
             columns = df.columns.values
@@ -982,10 +946,7 @@ class MDF(object):
                 df = self.df
             df.to_csv(str(outfile), sep="\t", index=True)
 
-        return (
-            ppg.FileGeneratingJob(outfile, __write)
-            .depends_on(self.load())
-        )
+        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
     def write_excel(self, filename=None, index=False, full=True):
         if filename is None:
@@ -1041,25 +1002,30 @@ class MDF(object):
                 plt.text(1, 1, "Empty DataFrame")
             else:
                 figure = plots.generate_heatmap_simple_figure(
-                    df, title, label_function=label_function,
-                    show_column_label=show_column_label, **params
+                    df,
+                    title,
+                    label_function=label_function,
+                    show_column_label=show_column_label,
+                    **params,
                 )
             return figure
 
         params_job = ppg.ParameterInvariant(
             outfile.name + "_label_nice", list(params) + [title, show_column_label]
         )
-        deps.append(ppg.FunctionInvariant(f"FI_{str(outfile)}", plots.generate_heatmap_simple_figure))
+        deps.append(
+            ppg.FunctionInvariant(f"FI_{str(outfile)}", plots.generate_heatmap_simple_figure)
+        )
         job = MPPlotJob(outfiles[0], __calc, __plot)
         job.depends_on(deps)
         job.depends_on(params_job)
         return job
 
-#        return (
-#            ppg.MultiFileGeneratingJob(outfiles, __plot)
-#            .depends_on(deps)
-#            .depends_on(params_job)
-#        )
+    #        return (
+    #            ppg.MultiFileGeneratingJob(outfiles, __plot)
+    #            .depends_on(deps)
+    #            .depends_on(params_job)
+    #        )
 
     def plot_singlepage(
         self,
@@ -1082,6 +1048,7 @@ class MDF(object):
         elif isinstance(outfile, str):
             outfile = Path(outfile)
         outfile.parent.mkdir(parents=True, exist_ok=True)
+
         def __plot():
             df = self.df
             if df.shape[0] == 0 or df.shape[1] == 0:
@@ -1107,7 +1074,6 @@ class MDF(object):
                 figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
-
         params_job = ppg.ParameterInvariant(
             outfile.name + "_label_nice",
             list(params)
@@ -1122,9 +1088,7 @@ class MDF(object):
         )
 
         return (
-            ppg.FileGeneratingJob(outfile, __plot)
-            .depends_on(dependencies)
-            .depends_on(params_job)
+            ppg.FileGeneratingJob(outfile, __plot).depends_on(dependencies).depends_on(params_job)
         )
 
     def plot_multipage(
@@ -1151,7 +1115,7 @@ class MDF(object):
         if outf.name.endswith("png"):
             raise ValueError("Output format for multipage plot must be pdf.")
         if label_function is None:
-            label_function = lambda x:x
+            label_function = lambda x: x
 
         def __plot():
             dpi = params.get("dpi", 300)
@@ -1198,11 +1162,7 @@ class MDF(object):
                 show_row_label,
             ],
         )
-        return (
-            ppg.FileGeneratingJob(outf, __plot)
-            .depends_on(dependencies)
-            .depends_on(params_job)
-        )
+        return ppg.FileGeneratingJob(outf, __plot).depends_on(dependencies).depends_on(params_job)
 
     def plot_2d(
         self,
@@ -1231,13 +1191,9 @@ class MDF(object):
             df = self.df
             if class_label_column is not None:
                 if not class_label_column in self.df_meta_rows.columns:
-                    raise ValueError(
-                        f"No class label column {class_label_column} in df_meta_rows."
-                    )
+                    raise ValueError(f"No class label column {class_label_column} in df_meta_rows.")
                 else:
-                    df[class_label_column] = self.df_meta_rows[
-                        class_label_column
-                    ].values
+                    df[class_label_column] = self.df_meta_rows[class_label_column].values
             if row_labels is not None:
                 tmp = []
                 for i in df.index:
@@ -1256,8 +1212,12 @@ class MDF(object):
                         print(type(model))
                         print(hasattr(model, "explained_variance_ratio"))
                         if hasattr(model, "explained_variance_ratio"):
-                            xlabel = f" ({model.explained_variance_ratio[0]*100:.2f}%) expl. variance"
-                            ylabel = f" ({model.explained_variance_ratio[1]*100:.2f}%) expl. variance"
+                            xlabel = (
+                                f" ({model.explained_variance_ratio[0]*100:.2f}%) expl. variance"
+                            )
+                            ylabel = (
+                                f" ({model.explained_variance_ratio[1]*100:.2f}%) expl. variance"
+                            )
                 figure = plots.generate_dr_plot(
                     df,
                     title,
@@ -1272,17 +1232,14 @@ class MDF(object):
                 figure = plt.figure()
                 plt.text(1, 1, "Empty DataFrame")
             return figure
-                
+
         dependencies.append(
             ppg.ParameterInvariant(
-                outfile.name + "_2d", list(params) + [title, class_label_column, show_names, model_name],
+                outfile.name + "_2d",
+                list(params) + [title, class_label_column, show_names, model_name],
             )
         )
-        dependencies.append(
-            ppg.FunctionInvariant(
-                "FI_label_function", label_function
-            )
-        )
+        dependencies.append(ppg.FunctionInvariant("FI_label_function", label_function))
         job = MPPlotJob(outfiles[0], __calc, __plot)
         job.plot_depends_on(dependencies)
         for of in outfiles[1:]:
