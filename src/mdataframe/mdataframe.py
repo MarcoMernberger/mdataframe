@@ -13,7 +13,7 @@ from mplots import MPPlotJob
 import matplotlib
 
 matplotlib.use("agg")
-import pypipegraph as ppg
+import pypipegraph2 as ppg2
 import mbf.genomics
 import copy
 import os
@@ -29,8 +29,6 @@ import pandas as pd
 import pickle
 import math
 import matplotlib.gridspec as grid
-import functools
-import collections
 import warnings
 
 
@@ -208,7 +206,7 @@ class MDF(object):
                 anno_names.extend(list(anno.columns))
                 self.dependencies.append(self.df_or_gene_or_loading_function.add_annotator(anno))  #
             self.dependencies.append(
-                ppg.ParameterInvariant(self.name + "_anno_parameter_invariant", [anno_names])
+                ppg2.ParameterInvariant(self.name + "_anno_parameter_invariant", [anno_names])
             )
         elif isinstance(self.df_or_gene_or_loading_function, pd.DataFrame):
             self.dependencies.append(
@@ -221,11 +219,11 @@ class MDF(object):
                     ],
                 )
             )
-        self.dependencies.append(ppg.ParameterInvariant(self.name + "_columns", self.columns))
-        self.dependencies.append(ppg.ParameterInvariant(self.name + "_rows", self.rows))
-        self.dependencies.append(ppg.ParameterInvariant(self.name + "_rowid", self.index_column))
+        self.dependencies.append(ppg2.ParameterInvariant(self.name + "_columns", self.columns))
+        self.dependencies.append(ppg2.ParameterInvariant(self.name + "_rows", self.rows))
+        self.dependencies.append(ppg2.ParameterInvariant(self.name + "_rowid", self.index_column))
         self.dependencies.append(
-            ppg.ParameterInvariant(
+            ppg2.ParameterInvariant(
                 self.name + "_kwargs",
                 list(kwargs),
             )
@@ -310,13 +308,13 @@ class MDF(object):
             for attr_name in dictionary_with_attributes:
                 setattr(self, attr_name, dictionary_with_attributes[attr_name])
 
-        return (
-            ppg.CachedDataLoadingJob(
-                os.path.join(self.cache_dir, self.cache_name + "_load"), __calc, __load
-            )
-            .depends_on(self.dependencies)
-            .depends_on(ppg.FunctionInvariant(self.cache_name + "_load_calc", __calc))
+        job_tuple = ppg2.CachedDataLoadingJob(
+            os.path.join(self.cache_dir, self.cache_name + "_load"), __calc, __load
         )
+        job_tuple[0].depends_on(self.dependencies)
+        job_tuple[1].depends_on(self.dependencies)
+        job_tuple[1].depends_on(ppg2.FunctionInvariant(self.cache_name + "_load_calc", __calc))
+        return list(job_tuple)
 
     def sort(self, *sorting_transformations, axis=0):
         """
@@ -341,7 +339,7 @@ class MDF(object):
             if callable(sorting):
                 # supply a sorting function that takes a dataframe
                 deps.append(
-                    ppg.FunctionInvariant(
+                    ppg2.FunctionInvariant(
                         f"{new_name}_{sorting.__name__.replace('>', '').replace('<', '')}",
                         sorting,
                     )
@@ -406,7 +404,7 @@ class MDF(object):
 
         for sort in sorts:
             if isinstance(sort, list):
-                deps.append(ppg.ParameterInvariant(f"{new_name}_PI{str(sort[1])}", sort[1:]))
+                deps.append(ppg2.ParameterInvariant(f"{new_name}_PI{str(sort[1])}", sort[1:]))
         deps.extend(self.get_dependencies() + [self.load()])
 
         def __scale():
@@ -479,7 +477,7 @@ class MDF(object):
                 "df_meta_rows": df_meta_rows,
             }
 
-        deps.append(ppg.FunctionInvariant(new_name + "_sort", __scale))
+        deps.append(ppg2.FunctionInvariant(new_name + "_sort", __scale))
         return MDF(
             new_name,
             __scale,
@@ -497,7 +495,7 @@ class MDF(object):
                 transformation_name = transformation.__name__.replace(">", "").replace("<", "")
                 transforms.append((0, transformation))
                 deps.append(
-                    ppg.FunctionInvariant(
+                    ppg2.FunctionInvariant(
                         new_name + "_FI{}".format(transformation_name), transformation
                     )
                 )
@@ -510,14 +508,14 @@ class MDF(object):
                 transforms.append((0, transformation.transform))
                 transformation_name = transformation.name
                 deps.append(
-                    ppg.FunctionInvariant(
+                    ppg2.FunctionInvariant(
                         new_name + "_{}".format(transformation_name),
                         transformation.transform,
                     )
                 )
                 if hasattr(transformation, "get_invariant_parameters"):
                     deps.append(
-                        ppg.ParameterInvariant(
+                        ppg2.ParameterInvariant(
                             f"{new_name}_PI_{transformation.name}",
                             transformation.get_invariant_parameters(),
                         )
@@ -527,7 +525,7 @@ class MDF(object):
                     transforms.append((1, transformation))
                     transformation_name = transformation
                     deps.append(
-                        ppg.ParameterInvariant(f"{new_name}_PI_{transformation}", [transformation])
+                        ppg2.ParameterInvariant(f"{new_name}_PI_{transformation}", [transformation])
                     )
                 else:
                     raise ValueError(
@@ -547,7 +545,9 @@ class MDF(object):
                             positional.append(item)
                     transforms.append((2, [transformation[0], positional, keyargs]))
                     deps.append(
-                        ppg.ParameterInvariant(f"{new_name}_PI_{transformation[0]}", transformation)
+                        ppg2.ParameterInvariant(
+                            f"{new_name}_PI_{transformation[0]}", transformation
+                        )
                     )
                 else:
                     raise ValueError(
@@ -571,7 +571,7 @@ class MDF(object):
                 func = transformation["func"]
                 del transformation["func"]
                 transforms.append((2, [func, [], transformation]))
-                deps.append(ppg.ParameterInvariant(f"{new_name}_PI_{func}", list(transformation)))
+                deps.append(ppg2.ParameterInvariant(f"{new_name}_PI_{func}", list(transformation)))
             else:
                 raise ValueError(
                     "{} did not have a name or callable transformation function named 'transform' and is not a valid method on pandas.DataFrame.".format(
@@ -582,7 +582,7 @@ class MDF(object):
         deps.extend(
             self.get_dependencies()
             + [self.load()]
-            + [ppg.ParameterInvariant(f"{new_name}_PI_kwargs", list(kwargs))]
+            + [ppg2.ParameterInvariant(f"{new_name}_PI_kwargs", list(kwargs))]
         )
         return new_name, transforms, deps
 
@@ -714,8 +714,8 @@ class MDF(object):
             attr_dict["aquired_attributes"] = aquired_attributes
             return attr_dict
 
-        deps.append(ppg.FunctionInvariant(new_name + "_func", __scale))
-        deps.append(ppg.ParameterInvariant(new_name + "_PR", list(kwargs)))
+        deps.append(ppg2.FunctionInvariant(new_name + "_func", __scale))
+        deps.append(ppg2.ParameterInvariant(new_name + "_PR", list(kwargs)))
         return MDF(
             new_name,
             __scale,
@@ -775,10 +775,10 @@ class MDF(object):
         new_name = "{}_Cl({})_axis_{}".format(self.name, strategy.name, axis)
         deps = self.dependencies + [
             self.load(),
-            ppg.ParameterInvariant(
+            ppg2.ParameterInvariant(
                 new_name + "_params", [axis, fit_parameter] + strategy.invariants
             ),
-            ppg.FunctionInvariant(new_name + "_func", strategy.fit),
+            ppg2.FunctionInvariant(new_name + "_func", strategy.fit),
         ]
 
         def __do_cluster():
@@ -829,7 +829,7 @@ class MDF(object):
             attr_dict["aquired_attributes"] = aquired_attributes
             return attr_dict
 
-        deps.append(ppg.FunctionInvariant(new_name + "_do_Cluster", __do_cluster))
+        deps.append(ppg2.FunctionInvariant(new_name + "_do_Cluster", __do_cluster))
         return MDF(
             new_name,
             __do_cluster,
@@ -851,10 +851,10 @@ class MDF(object):
             new_name = name
         deps = self.dependencies + [
             self.load(),
-            ppg.ParameterInvariant(
+            ppg2.ParameterInvariant(
                 new_name + "_params", [axis, fit_parameter] + strategy.invariants
             ),
-            ppg.FunctionInvariant(new_name + "_func", strategy.fit),
+            ppg2.FunctionInvariant(new_name + "_func", strategy.fit),
         ]
         new_index = [f"{strategy.name} {i+1}" for i in range(strategy.dimensions)]
         new_resdir = self.result_dir.parent / new_name
@@ -912,7 +912,7 @@ class MDF(object):
             attr_dict["aquired_attributes"] = aquired_attributes
             return attr_dict
 
-        deps.append(ppg.FunctionInvariant(new_name + "__do_reducefunc", __do_reduce))
+        deps.append(ppg2.FunctionInvariant(new_name + "__do_reducefunc", __do_reduce))
         return MDF(
             new_name,
             __do_reduce,
@@ -946,7 +946,7 @@ class MDF(object):
                 df = self.df
             df.to_csv(str(outfile), sep="\t", index=True)
 
-        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
+        return ppg2.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
     def write_excel(self, filename=None, index=False, full=True):
         if filename is None:
@@ -970,7 +970,7 @@ class MDF(object):
                 df = dfs[sheet_name]
                 df.to_excel(writer, sheet_name=sheet_name, index=index)
 
-        return ppg.FileGeneratingJob(outfile, __write).depends_on(self.load())
+        return ppg2.FileGeneratingJob(outfile, __write).depends_on(self.load())
 
     def plot_simple(
         self,
@@ -993,6 +993,7 @@ class MDF(object):
         outfiles = [outfile, outfile.with_suffix(".svg")]
 
         def __calc():
+            print(self.df)
             df = self.df
             return df
 
@@ -1010,19 +1011,21 @@ class MDF(object):
                 )
             return figure
 
-        params_job = ppg.ParameterInvariant(
+        params_job = ppg2.ParameterInvariant(
             outfile.name + "_label_nice", list(params) + [title, show_column_label]
         )
         deps.append(
-            ppg.FunctionInvariant(f"FI_{str(outfile)}", plots.generate_heatmap_simple_figure)
+            ppg2.FunctionInvariant(f"FI_{str(outfile)}", plots.generate_heatmap_simple_figure)
         )
-        job = MPPlotJob(outfiles[0], __calc, __plot)
-        job.depends_on(deps)
-        job.depends_on(params_job)
-        return job
+        jobtuple = MPPlotJob(outfiles[0], __calc, __plot)
+        jobtuple.cache.calc.depends_on(deps)
+        jobtuple.cache.calc.depends_on(params_job)
+        jobtuple.plot.depends_on(deps)
+        jobtuple.plot.depends_on(params_job)
+        return jobtuple
 
     #        return (
-    #            ppg.MultiFileGeneratingJob(outfiles, __plot)
+    #            ppg2.MultiFileGeneratingJob(outfiles, __plot)
     #            .depends_on(deps)
     #            .depends_on(params_job)
     #        )
@@ -1074,7 +1077,7 @@ class MDF(object):
                 figure.savefig(outfile)
             df.to_csv(str(outfile) + ".tsv", index=False, sep="\t")
 
-        params_job = ppg.ParameterInvariant(
+        params_job = ppg2.ParameterInvariant(
             outfile.name + "_label_nice",
             list(params)
             + [
@@ -1088,7 +1091,7 @@ class MDF(object):
         )
 
         return (
-            ppg.FileGeneratingJob(outfile, __plot).depends_on(dependencies).depends_on(params_job)
+            ppg2.FileGeneratingJob(outfile, __plot).depends_on(dependencies).depends_on(params_job)
         )
 
     def plot_multipage(
@@ -1150,7 +1153,7 @@ class MDF(object):
                 pdf.close()
             df.to_csv(str(outf) + ".tsv", index=False, sep="\t")
 
-        params_job = ppg.ParameterInvariant(
+        params_job = ppg2.ParameterInvariant(
             outf.name + "_label_nice",
             list(params)
             + [
@@ -1162,7 +1165,7 @@ class MDF(object):
                 show_row_label,
             ],
         )
-        return ppg.FileGeneratingJob(outf, __plot).depends_on(dependencies).depends_on(params_job)
+        return ppg2.FileGeneratingJob(outf, __plot).depends_on(dependencies).depends_on(params_job)
 
     def plot_2d(
         self,
@@ -1175,7 +1178,7 @@ class MDF(object):
         model_name=None,
         **params,
     ):
-        dependencies.append(self.load())
+        dependencies.extend(self.load())
         if outfile is None:
             outfile = Path(self.result_dir) / f"{self.name}_2d.png"
         elif isinstance(outfile, str):
@@ -1208,9 +1211,6 @@ class MDF(object):
                 if model_name is not None:
                     if hasattr(self, model_name):
                         model = getattr(self, model_name)
-                        print(model)
-                        print(type(model))
-                        print(hasattr(model, "explained_variance_ratio"))
                         if hasattr(model, "explained_variance_ratio"):
                             xlabel = (
                                 f" ({model.explained_variance_ratio[0]*100:.2f}%) expl. variance"
@@ -1234,15 +1234,15 @@ class MDF(object):
             return figure
 
         dependencies.append(
-            ppg.ParameterInvariant(
+            ppg2.ParameterInvariant(
                 outfile.name + "_2d",
                 list(params) + [title, class_label_column, show_names, model_name],
             )
         )
-        dependencies.append(ppg.FunctionInvariant("FI_label_function", label_function))
-        job = MPPlotJob(outfiles[0], __calc, __plot)
-        job.plot_depends_on(dependencies)
+        dependencies.append(ppg2.FunctionInvariant("FI_label_function", label_function))
+        jobtuple = MPPlotJob(outfiles[0], __calc, __plot, dependencies=dependencies)
+        jobs = [jobtuple]
         for of in outfiles[1:]:
-            job.add_another_plot(of, __plot)
-        job.depends_on(dependencies)
-        return job
+            jobs2 = MPPlotJob(of, __calc, __plot, dependencies=dependencies)
+            jobs.append(jobs2)
+        return jobs

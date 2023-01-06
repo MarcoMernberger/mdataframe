@@ -1,11 +1,12 @@
-'''
+"""
 Created on Mar 23, 2016
 
 This module is used for multi-dimensional scaling.
 @author: mernberger
-'''
+"""
 import matplotlib
-#from matplotlib.mlab import PCA as mlabPCA
+
+# from matplotlib.mlab import PCA as mlabPCA
 from matplotlib import pyplot as plt
 from matplotlib import offsetbox
 from mpl_toolkits.mplot3d import Axes3D
@@ -22,22 +23,23 @@ import sklearn.datasets
 import scipy
 import scipy.stats
 from scipy.interpolate import interp1d
-#import seaborn.apionly as sns
+
+# import seaborn.apionly as sns
 import itertools
 from pathlib import Path
 
+
 class DimensionalityReduction:
-    
     def __init__(self, name, dimensions, invariants):
         """
-        This is a wrapper for any dimensionality reduction approach. 
+        This is a wrapper for any dimensionality reduction approach.
         @param name of the clustering strategy
         """
         self.__name = name
         self.__invariants = invariants
         self.__dimensions = dimensions
         self.__transformer = None
-    
+
     @property
     def dimensions(self):
         return self.__dimensions
@@ -49,32 +51,27 @@ class DimensionalityReduction:
     @property
     def name(self):
         return self.__name
-    
+
     def fit(self, df, **fit_parameter):
         self.__transformer = self.__transformer.fit(df, fit_parameter)
         self.__transformed_matrix = self.transformer.transform(df)
-        
+
 
 class SklearnPCA(DimensionalityReduction):
-    
-    def __init__(self, name, dimensions = 3, whiten = True):
+    def __init__(self, name, dimensions=3, whiten=True):
         self.__whiten = whiten
-        invariants = [
-            dimensions,
-            name,
-            whiten
-        ]
+        invariants = [dimensions, name, whiten]
         super().__init__(name, dimensions, invariants)
         self.__transformer = sklearnPCA(
-            n_components = self.dimensions,
-            copy=True, 
-            whiten=self.__whiten, 
-            svd_solver='auto', 
-            tol=0.0, 
-            iterated_power='auto', 
-            random_state=None
-            )
-    
+            n_components=self.dimensions,
+            copy=True,
+            whiten=self.__whiten,
+            svd_solver="auto",
+            tol=0.0,
+            iterated_power="auto",
+            random_state=None,
+        )
+
     def fit(self, df, **fit_parameter):
         self.__transformer = self.__transformer.fit(df, **fit_parameter)
         self.__transformed_matrix = self.__transformer.transform(df)
@@ -92,14 +89,16 @@ class SklearnPCA(DimensionalityReduction):
     @property
     def explained_variance(self):
         return self.__explained_variance
+
     @property
     def explained_variance_ratio(self):
         return self.__explained_variance_ratio
 
+
 class ClusteringMethod:
     def __init__(self, name, invariants):
         """
-        This is a wrapper for any clustering approach. 
+        This is a wrapper for any clustering approach.
         @param name of the clustering strategy
         """
         self.__name = name
@@ -209,7 +208,6 @@ class ClassLabel(ClusteringMethod):
 
     def predict(self, df_other, imputer, scaler, **fit_parameter):
         return NotImplementedError
-
 
 
 class DBSCAN(ClusteringMethod):
@@ -333,6 +331,7 @@ class SKlearnAgglomerative(ClusteringMethod):
     def no_of_clusters(self):
         return self.__no_of_clusters
 
+
 '''
     def new_fit_function(self):
         """
@@ -446,10 +445,9 @@ class SKlearnAgglomerative(ClusteringMethod):
         return np.array(ret, dtype=float)
 '''
 
+
 class ScipyAgglomerative(ClusteringMethod):
-    def __init__(
-        self, name, no_of_clusters=2, threshold=2, affinity="euclidean", linkage="ward"
-    ):
+    def __init__(self, name, no_of_clusters=2, threshold=2, affinity="euclidean", linkage="ward"):
         """
         This is a wrapper for hierarchical clustering from scipy. Use this if you want dendrograms.
         """
@@ -483,7 +481,7 @@ class ScipyAgglomerative(ClusteringMethod):
 
     def get_linkage(self):
         return self.model
-        
+
         '''
 # old stuff below
 class PCA(ML_Base):
