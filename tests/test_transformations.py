@@ -34,12 +34,13 @@ def test_tmm_init(test_frame, test_samples_to_group):
     assert tmm.name == "TMM"
     assert tmm.samples_to_group is None
     assert tmm.batch_effects is None
-    tmm = TMM(test_samples_to_group)
+    assert not tmm.suffix
+    tmm = TMM(test_samples_to_group, suffix=True)
     assert tmm.samples_to_group == test_samples_to_group
     assert tmm.batch_effects is None
     assert tmm.suffix == " (TMM)"
     batches = dict(zip(test_frame.columns, ["x"] * 2 + ["y"] * 4))
-    tmm = TMM(test_samples_to_group, batches)
+    tmm = TMM(test_samples_to_group, batches, suffix=True)
     assert tmm.samples_to_group == test_samples_to_group
     assert tmm.batch_effects == batches
     assert tmm.suffix == " (TMM batch-corrected)"
@@ -50,12 +51,25 @@ def test_tmm_call(test_frame, test_samples_to_group):
     assert callable(tmm)
     df = tmm(test_frame)
     assert isinstance(df, DataFrame)
+    assert (df.columns == test_frame.columns).all()
     with pytest.raises(ValueError, match="Transformer calls need a DataFrame as first parameter"):
         tmm("this is not a dataframe")
 
 
+def test_tmm_call_numeric_labels(test_frame, test_samples_to_group):
+    replace_columns = {col: "2" + col for col in test_frame.columns}
+    numeric_column_frame = test_frame.rename(columns=replace_columns)
+    numeric_column_samples_groups = {
+        "2" + col: test_samples_to_group[col] for col in test_samples_to_group
+    }
+    tmm = TMM(numeric_column_samples_groups)
+    assert callable(tmm)
+    df = tmm(numeric_column_frame)
+    assert (numeric_column_frame.columns == df.columns).all()
+
+
 def test_tmm_no_batches(test_frame, test_samples_to_group):
-    tmm = TMM(test_samples_to_group)
+    tmm = TMM(test_samples_to_group, suffix=True)
     result = tmm(test_frame)
     r_result = DataFrame(
         {
@@ -74,7 +88,7 @@ def test_tmm_no_batches(test_frame, test_samples_to_group):
 
 def test_tmm_batches(test_frame, test_samples_to_group):
     batches = dict(zip(test_frame.columns, ["x"] * 2 + ["y"] * 4))
-    tmm = TMM(test_samples_to_group, batches)
+    tmm = TMM(test_samples_to_group, batches, suffix=True)
     result = tmm(test_frame)
     r_result = DataFrame(
         {
@@ -95,7 +109,8 @@ def test_VST_init(test_frame, test_samples_to_group):
     vst = VST()
     assert vst.name == "VST"
     assert vst.samples_to_group is None
-    vst = VST(test_samples_to_group)
+    assert not vst.suffix
+    vst = VST(test_samples_to_group, suffix=True)
     assert vst.samples_to_group == test_samples_to_group
     assert vst.suffix == " (VST)"
 
@@ -104,13 +119,14 @@ def test_vst_call(test_frame, test_samples_to_group):
     vst = VST(test_samples_to_group)
     assert callable(vst)
     df = vst(test_frame)
+    assert (df.columns == test_frame.columns).all()
     assert isinstance(df, DataFrame)
     with pytest.raises(ValueError, match="Transformer calls need a DataFrame as first parameter"):
         vst("this is not a dataframe")
 
 
 def test_vst_results(test_frame, test_samples_to_group):
-    vst = VST(test_samples_to_group)
+    vst = VST(test_samples_to_group, suffix=True)
     result = vst(test_frame)
     r_result = DataFrame(
         {

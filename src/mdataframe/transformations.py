@@ -1,6 +1,7 @@
-from pandas import DataFrame
-from typing import Optional, Callable, Dict
+from pandas import DataFrame, Index
+from typing import Optional, Union, Dict
 from mbf.r import convert_dataframe_to_r, convert_dataframe_from_r
+from abc import ABC
 import hashlib
 import pandas as pd
 import numpy as np
@@ -12,13 +13,14 @@ __copyright__ = "Copyright (c) 2020 Marco Mernberger"
 __license__ = "mit"
 
 
-class _Transformer:
+class _Transformer(ABC):
     """The transformer class needs to have __call__, a name, a hash function"""
 
     def __init__(self, name: str, *args, **kwargs):
         self.name = name
         self.__set_params(args, kwargs)
         self.__calculate_hash()
+        self.suffix = False
 
     def __set_params(self, args_from_init, kwargs_from_init):
         self._parameter_as_string = ",".join([str(x) for x in args_from_init])
@@ -44,17 +46,27 @@ class _Transformer:
             """
         )
 
+    def _post_call(self, df: DataFrame, index: Index) -> DataFrame:
+        df = df.reset_index(drop=True)
+        if self.suffix:
+            df.columns = [f"{col}{self.suffix}" for col in df.columns]
+        df.index = index
+        return df
+
 
 class TMM(_Transformer):
     def __init__(
         self,
         samples_to_group: Optional[Dict[str, str]] = None,
         batch_effects: Optional[Dict[str, str]] = None,
+        suffix: Union[bool, str] = False,
     ):
         super().__init__("TMM", samples_to_group, batch_effects)
         self.samples_to_group = samples_to_group
         self.batch_effects = batch_effects
-        self.suffix = " (TMM)" if self.batch_effects is None else " (TMM batch-corrected)"
+        self.suffix = suffix
+        if suffix is True:
+            self.suffix = " (TMM)" if self.batch_effects is None else " (TMM batch-corrected)"
 
     def __call__(self, df_raw_counts: DataFrame) -> DataFrame:
         """
@@ -81,7 +93,6 @@ class TMM(_Transformer):
             )
         ro.r("library(edgeR)")
         ro.r("library(base)")
-        columns = df_raw_counts.columns
         # create the df_samples dataframe
         to_df = {"lib.size": df_raw_counts.sum(axis=0).values}
         if self.samples_to_group is not None:
@@ -92,9 +103,14 @@ class TMM(_Transformer):
             to_df["batch"] = [
                 self.batch_effects[sample_name] for sample_name in df_raw_counts.columns
             ]
+        columns_for_r = {col: "X" + col for col in df_raw_counts.columns}
+        df_raw_counts = df_raw_counts.rename(columns=columns_for_r)
         df_samples = pd.DataFrame(to_df)
         df_samples["lib.size"] = df_samples["lib.size"].astype(int)
+        df_samples = df_samples.rename(columns_for_r)
         r_counts = convert_dataframe_to_r(df_raw_counts)
+        ro.r("head")(r_counts)
+
         r_samples = convert_dataframe_to_r(df_samples)
         dgelist = ro.r("DGEList")(
             counts=r_counts,
@@ -121,19 +137,23 @@ class TMM(_Transformer):
             )(logtmm=logtmm, batch=batches)
         cpm = ro.r("data.frame")(logtmm)
         df = convert_dataframe_from_r(cpm)
-        df = df.reset_index(drop=True)
-        df.columns = [f"{col}{self.suffix}" for col in columns]
-        df.index = df_raw_counts.index
-        return df
+        df = df.rename(columns={k: v for v, k in columns_for_r.items()})
+        return self._post_call(df, df_raw_counts.index)
 
 
 class VST(_Transformer):
-    def __init__(self, samples_to_group: Optional[Dict[str, str]] = None, nsub: int = 1000):
+    def __init__(
+        self,
+        samples_to_group: Optional[Dict[str, str]] = None,
+        nsub: int = 1000,
+        suffix: Union[bool, str] = False,
+    ):
         super().__init__("VST", samples_to_group, nsub)
         self.samples_to_group = samples_to_group
         self.nsub = nsub
-
-        self.suffix = " (VST)"
+        self.suffix = suffix
+        if self.suffix is True:
+            self.suffix = " (VST)"
 
     def __call__(self, df_raw_counts: DataFrame) -> DataFrame:
         """
@@ -183,7 +203,4 @@ class VST(_Transformer):
             """
         )(var_stabilized=var_stabilized)
         df = convert_dataframe_from_r(var_stabilized)
-        df = df.reset_index(drop=True)
-        df.columns = [f"{col}{self.suffix}" for col in columns]
-        df.index = df_raw_counts.index
-        return df
+        return self._post_call(df, df_raw_counts.index)
