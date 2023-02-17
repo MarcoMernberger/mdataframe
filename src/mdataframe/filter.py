@@ -26,7 +26,6 @@ class Filter(_Transformer):
         self.__filters = []
         for filter_arg in self.filter_args:
             ff = self.interpret_filter(filter_arg)
-            print(ff)
             self.__filters.append(ff)
 
     @classmethod

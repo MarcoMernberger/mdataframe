@@ -24,3 +24,4 @@ from .mdataframe import *
 from .strategies import *
 from .transformations import TMM, VST
 from .filter import Filter
+from .clustering import Agglo
