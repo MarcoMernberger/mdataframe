@@ -6,9 +6,44 @@ from collections.abc import Collection
 from mbf.r import convert_dataframe_to_r, convert_dataframe_from_r
 from pandas import DataFrame, Index
 from .transformations import _Transformer
+from abc import ABC
 
 
-class EdgeR_Unpaired(_Transformer):
+class Differential(_Transformer, ABC):
+    def __init__(self, name, *args):
+        super().__init__(name, *args)
+        self.suffix = f" ({self.name})"
+
+    @property
+    def logFC(self) -> str:
+        return self.logFC_column
+
+    @property
+    def P(self) -> str:
+        return self.p_column
+
+    @property
+    def FDR(self) -> str:
+        return self.fdr_column
+
+    @property
+    def logFC_column(self) -> str:
+        return "log2FC" + self.suffix
+
+    @property
+    def p_column(self) -> str:
+        return "p" + self.suffix
+
+    @property
+    def fdr_column(self) -> str:
+        return "FDR" + self.suffix
+
+    @property
+    def columns(self) -> List[str]:
+        return self._columns
+
+
+class EdgeR_Unpaired(Differential):
     def __init__(
         self,
         columns_a: Collection,
@@ -16,6 +51,7 @@ class EdgeR_Unpaired(_Transformer):
         comparison_name: Optional[str] = None,
         library_sizes: Optional[Iterable] = None,
         manual_dispersion_value: float = 0.4,
+        **parameters,
     ):
         super().__init__(
             "EdgeR_Unpaired",
@@ -32,26 +68,18 @@ class EdgeR_Unpaired(_Transformer):
         self.columns_b = columns_b
         self.library_sizes = library_sizes
         self.manual_dispersion_value = manual_dispersion_value
+        self.parameters = parameters
+        if len(parameters) > 0:
+            raise NotImplementedError
+        self._columns = [self.logFC_column, self.p_column, self.fdr_column, self.logCPM_column]
 
     @property
-    def logFC_column(self) -> str:
-        return "log2FC" + self.suffix
-
-    @property
-    def p_column(self) -> str:
-        return "p" + self.suffix
-
-    @property
-    def fdr_column(self) -> str:
-        return "FDR" + self.suffix
+    def logCPM(self) -> str:
+        return self.logCPM_column
 
     @property
     def logCPM_column(self) -> str:
         return "logCPM" + self.suffix
-
-    @property
-    def columns(self) -> List[str]:
-        return [self.logFC_column, self.p_column, self.fdr_column, self.logCPM_column]
 
     def __prepare_input(self, df: DataFrame) -> DataFrame:
         input_df = df[list(self.columns_a) + list(self.columns_b)]
@@ -71,16 +99,16 @@ class EdgeR_Unpaired(_Transformer):
     def __post_call(self, result: DataFrame, index: Index) -> DataFrame:
         result = result.rename(
             columns={
-                "logFC": self.logFC_column,
+                "log2FC": self.logFC_column,
                 "PValue": self.p_column,
-                "logCPM": self.logCPM_column,
+                "log2CPM": self.logCPM_column,
                 "FDR": self.fdr_column,
             }
         )
         result = result.loc[index]
         return result
 
-    def __call__(self, df: DataFrame) -> DataFrame:
+    def __call__(self, df: DataFrame, *args, **kwargs) -> DataFrame:
         """Call edgeR exactTest comparing two groups unpaired."""
         ro.r("library(edgeR)")
         input_df = self.__prepare_input(df)
@@ -114,31 +142,42 @@ class EdgeR_Unpaired(_Transformer):
         return self.__post_call(convert_dataframe_from_r(res[0]), input_df.index)
 
 
-class DESeq2_Unpaired(_Transformer):
+class DESeq2Unpaired(Differential):
     def __init__(
         self,
         columns_a: Collection,
         columns_b: Collection,
         comparison_name: Optional[str] = None,
+        **parameters,
     ):
-        super().__init__("DESeq2_Unpaired", columns_a, columns_b, comparison_name)
-        self.suffix = f" ({self.name})"
+        super().__init__("DESeq2Unpaired", columns_a, columns_b, comparison_name)
         if comparison_name is not None:
             self.suffix = f" ({comparison_name})"
         self.columns_a = columns_a
         self.columns_b = columns_b
+        self.parameters = parameters
+        if len(parameters) > 0:
+            raise NotImplementedError
+        self._columns = [
+            self.logFC_column,
+            self.p_column,
+            self.fdr_column,
+            self.baseMean_column,
+            self.lfcSE_column,
+            self.stat_column,
+        ]
 
     @property
-    def logFC_column(self) -> str:
-        return "log2FC" + self.suffix
+    def baseMean(self) -> str:
+        return self.baseMean_column
 
     @property
-    def p_column(self) -> str:
-        return "p" + self.suffix
+    def lfcSE(self) -> str:
+        return self.lfcSE_column
 
     @property
-    def fdr_column(self) -> str:
-        return "FDR" + self.suffix
+    def stat(self) -> str:
+        return self.stat_column
 
     @property
     def baseMean_column(self) -> str:
@@ -152,17 +191,6 @@ class DESeq2_Unpaired(_Transformer):
     def stat_column(self) -> str:
         return "stat" + self.suffix
 
-    @property
-    def columns(self) -> List[str]:
-        return [
-            self.logFC_column,
-            self.p_column,
-            self.fdr_column,
-            self.baseMean_column,
-            self.lfcSE_column,
-            self.stat_column,
-        ]
-
     def __prepare_sample_df(self) -> DataFrame:
         df_samples = pd.DataFrame(
             {
@@ -173,7 +201,7 @@ class DESeq2_Unpaired(_Transformer):
         df_samples = df_samples.set_index("samples")
         return df_samples
 
-    def __call__(self, df_raw_counts: DataFrame) -> DataFrame:
+    def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
         """
         Call to DESeq2 via r2py to get variance-stabilizing transformation of
         the raw counts.
@@ -200,17 +228,137 @@ class DESeq2_Unpaired(_Transformer):
         formula = "~ condition"
         r_counts = convert_dataframe_to_r(df_raw_counts)
         r_samples = convert_dataframe_to_r(df_samples)
-        ro.r("print")(r_counts)
         deseq_dataset = ro.r("DESeqDataSetFromMatrix")(
             countData=r_counts, colData=r_samples, design=ro.Formula(formula)
         )
-        deseq_dataset = ro.r("DESeq")(deseq_dataset)
         ro.r("print")(deseq_dataset)
+        deseq_dataset = ro.r("DESeq")(deseq_dataset)
         result = ro.r("results")(deseq_dataset)
-        ro.r("print")(result)
         result = ro.r("as.data.frame")(result)
         df = convert_dataframe_from_r(result)
         return self.__post_call(df, df_raw_counts.index)
+
+    def __post_call(self, result: DataFrame, index: Index) -> DataFrame:
+        if isinstance(index, pd.RangeIndex):
+            result.index = result.index.astype(int)
+
+        result = result.rename(
+            columns={
+                "log2FoldChange": self.logFC_column,
+                "pvalue": self.p_column,
+                "padj": self.fdr_column,
+                "lfcSE": self.lfcSE_column,
+                "baseMean": self.baseMean_column,
+                "stat": self.stat_column,
+            }
+        )
+        result = result.loc[index]
+        return result
+
+
+class DESeq2Timeseries(Differential):
+    def __init__(
+        self,
+        sample_columns: Collection,
+        factors: Collection,
+        formula: str,
+        reduced: str,
+        comparison_name: Optional[str] = None,
+        **parameters,
+    ):
+        super().__init__(
+            "DESeq2TimeSeries", sample_columns, factors, formula, reduced, comparison_name
+        )
+        if comparison_name is not None:
+            self.suffix = f" ({comparison_name})"
+        self.sample_columns = sample_columns
+        self.factors = factors
+        self.formula = formula
+        self.reduced = reduced
+        self.parameters = parameters
+        if len(parameters) > 0:
+            raise NotImplementedError
+        self._columns = [
+            self.logFC_column,
+            self.p_column,
+            self.fdr_column,
+            self.baseMean_column,
+            self.lfcSE_column,
+            self.stat_column,
+        ]
+
+    @property
+    def baseMean(self) -> str:
+        return self.baseMean_column
+
+    @property
+    def lfcSE(self) -> str:
+        return self.lfcSE_column
+
+    @property
+    def stat(self) -> str:
+        return self.stat_column
+
+    @property
+    def baseMean_column(self) -> str:
+        return "baseMean" + self.suffix
+
+    @property
+    def lfcSE_column(self) -> str:
+        return "lfcSE" + self.suffix
+
+    @property
+    def stat_column(self) -> str:
+        return "stat" + self.suffix
+
+    def __call__(self, df_raw_counts: DataFrame) -> DataFrame:
+        """
+        Call to DESeq2 via r2py to get variance-stabilizing transformation of
+        the raw counts.
+
+        Prepare the DESeq2 input in python and call vst via
+        r2py.
+
+        Parameters
+        ----------
+        df_raw_counts : DataFrame
+            The dataframe containing the raw counts.
+
+        Returns
+        -------
+        DataFrame
+            A dataframe with VST normalized counts.
+        """
+        if not isinstance(df_raw_counts, DataFrame):
+            raise ValueError(
+                f"Transformer calls need a DataFrame as first parameter, was {type(df_raw_counts)}."
+            )
+        ro.r("library(DESeq2)")
+        df_samples = self.__prepare_sample_df()
+        r_counts = convert_dataframe_to_r(df_raw_counts)
+        r_samples = convert_dataframe_to_r(df_samples)
+        deseq_dataset = ro.r("DESeqDataSetFromMatrix")(
+            countData=r_counts, colData=r_samples, design=ro.Formula(self.formula)
+        )
+
+        # dds <- DESeq(dds, test="LRT", reduced=~batch)
+        # res <- results(dds)
+
+        deseq_dataset = ro.r("DESeq")(deseq_dataset)
+        result = ro.r("results")(deseq_dataset)
+        result = ro.r("as.data.frame")(result)
+        df = convert_dataframe_from_r(result)
+        return self.__post_call(df, df_raw_counts.index)
+
+        #    def __prepare_sample_df(self) -> DataFrame:
+        df_samples = pd.DataFrame(
+            {
+                "samples": list(self.sample_columns),
+                "condition": ["z"] * len(self.columns_a) + ["x"] * len(self.columns_b),
+            }
+        )
+        df_samples = df_samples.set_index("samples")
+        return df_samples
 
     def __post_call(self, result: DataFrame, index: Index) -> DataFrame:
         result = result.rename(

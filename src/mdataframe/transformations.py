@@ -33,12 +33,15 @@ class _Transformer(ABC):
     def hash(self):
         return self.__hash
 
+    def __freeze__(self):
+        return str(self.hash)
+
     def __calculate_hash(self):
         m = hashlib.sha256()
         m.update(self._parameter_as_string.encode(encoding="UTF-8"))
-        self.__hash = m.digest()
+        self.__hash = str(m.digest())
 
-    def __call__(self, df: DataFrame) -> DataFrame:
+    def __call__(self, df: DataFrame, *args, **kwargs) -> DataFrame:
         raise NotImplementedError(
             """
             You invoked the base class __call__() method. Make sure to override
@@ -52,6 +55,9 @@ class _Transformer(ABC):
             df.columns = [f"{col}{self.suffix}" for col in df.columns]
         df.index = index
         return df
+
+    def __code__(self):
+        return self.__call__.__code__()
 
 
 class TMM(_Transformer):

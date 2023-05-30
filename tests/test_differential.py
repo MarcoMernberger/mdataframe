@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 import numpy as np
-from mdataframe.differential import EdgeR_Unpaired, DESeq2_Unpaired
+from mdataframe.differential import EdgeR_Unpaired, DESeq2Unpaired
 from pandas import DataFrame
 
 
@@ -74,22 +74,22 @@ def test_edger_unpaired_call(test_frame):
         assert col in result.columns
 
 
-def test_deseq2_unpaired_init():
+def test_DESeq2Unpaired_init():
     columns_a = ["sampleA_1", "sampleA_2", "sampleA_3"]
     columns_b = ["sampleB_1", "sampleB_2", "sampleB_3"]
-    deseq = DESeq2_Unpaired(columns_a, columns_b)
-    assert deseq.name == "DESeq2_Unpaired"
-    assert deseq.suffix == " (DESeq2_Unpaired)"
+    deseq = DESeq2Unpaired(columns_a, columns_b)
+    assert deseq.name == "DESeq2Unpaired"
+    assert deseq.suffix == " (DESeq2Unpaired)"
     assert deseq.columns_a == columns_a
     assert deseq.columns_b == columns_b
-    deseq = DESeq2_Unpaired(columns_a, columns_b, "othername")
+    deseq = DESeq2Unpaired(columns_a, columns_b, "othername")
     assert deseq.suffix == " (othername)"
 
 
-def test_deseq2_unpaired_call(test_frame):
+def test_DESeq2Unpaired_call(test_frame):
     columns_a = ["sampleA_1", "sampleA_2", "sampleA_3"]
     columns_b = ["sampleB_1", "sampleB_2", "sampleB_3"]
-    deseq = DESeq2_Unpaired(columns_a, columns_b)
+    deseq = DESeq2Unpaired(columns_a, columns_b)
     assert callable(deseq)
     result = deseq(test_frame)
     assert isinstance(result, DataFrame)
@@ -128,7 +128,7 @@ def test_deseq2_unpaired_call(test_frame):
 def test_deseq2_column_names():
     columns_a = ["sampleA_1", "sampleA_2", "sampleA_3"]
     columns_b = ["sampleB_1", "sampleB_2", "sampleB_3"]
-    deseq = DESeq2_Unpaired(columns_a, columns_b)
+    deseq = DESeq2Unpaired(columns_a, columns_b)
     assert deseq.logFC_column == f"log2FC ({deseq.name})"
     assert deseq.p_column == f"p ({deseq.name})"
     assert deseq.fdr_column == f"FDR ({deseq.name})"

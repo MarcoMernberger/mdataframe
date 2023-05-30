@@ -22,5 +22,6 @@ finally:
 
 from .mdataframe import *
 from .strategies import *
-from .transformations import TMM, VST
+from .transformations import TMM, VST, _Transformer
 from .filter import Filter
+from .differential import *

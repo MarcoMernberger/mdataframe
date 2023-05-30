@@ -1,0 +1,18 @@
+@startuml
+!theme crt-green
+class _Transformer extends ABC {
+    +__call__()
+}
+
+class TMM extends _Transformer {
+    +__call__()
+}
+
+class VST extends _Transformer {
+    +__call__()
+}
+
+
+class MFrame extends DataFrame{
+    + __call__()    
+}

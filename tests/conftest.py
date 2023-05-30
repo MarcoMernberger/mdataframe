@@ -15,7 +15,6 @@
 
 import pathlib
 import sys
-
 root = pathlib.Path(".").parent.parent
 sys.path.append(str(root / "src"))
 sys.path.append(str(root.parent / "mreports" / "src"))
