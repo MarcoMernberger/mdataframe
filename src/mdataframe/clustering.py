@@ -1,4 +1,4 @@
-from typing import Optional, Iterable, List, Tuple, Any, Optional
+from typing import Optional, Iterable, List, Tuple, Any
 from pandas import DataFrame, Index
 from .transformations import _Transformer
 from abc import abstractmethod, ABC
@@ -50,3 +50,11 @@ class Agglo(Cluster):
 
     def _set_model(self, **kwargs):
         self._model = sklearn.cluster.AgglomerativeClustering(**kwargs)
+
+
+class KMeans(Cluster):
+    def __init__(self, name: str = "KNN", **kwargs):
+        super().__init__(name, **kwargs)
+
+    def _set_model(self, **kwargs):
+        self._model = sklearn.cluster.KMeans(**kwargs)
