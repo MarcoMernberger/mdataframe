@@ -1,7 +1,7 @@
 import math
 import rpy2.robjects as ro
 import pandas as pd
-from typing import Optional, Iterable, List
+from typing import Optional, Iterable, List, Dict
 from collections.abc import Collection
 from mbf.r import convert_dataframe_to_r, convert_dataframe_from_r
 from pandas import DataFrame, Index
@@ -99,9 +99,9 @@ class EdgeR_Unpaired(Differential):
     def __post_call(self, result: DataFrame, index: Index) -> DataFrame:
         result = result.rename(
             columns={
-                "log2FC": self.logFC_column,
+                "logFC": self.logFC_column,
                 "PValue": self.p_column,
-                "log2CPM": self.logCPM_column,
+                "logCPM": self.logCPM_column,
                 "FDR": self.fdr_column,
             }
         )
@@ -142,7 +142,7 @@ class EdgeR_Unpaired(Differential):
         return self.__post_call(convert_dataframe_from_r(res[0]), input_df.index)
 
 
-class DESeq2Unpaired(Differential):
+class DESeq2UnpairedSimple(Differential):
     def __init__(
         self,
         columns_a: Collection,
@@ -150,7 +150,7 @@ class DESeq2Unpaired(Differential):
         comparison_name: Optional[str] = None,
         **parameters,
     ):
-        super().__init__("DESeq2Unpaired", columns_a, columns_b, comparison_name)
+        super().__init__("DESeq2UnpairedSimple", columns_a, columns_b, comparison_name)
         if comparison_name is not None:
             self.suffix = f" ({comparison_name})"
         self.columns_a = columns_a
@@ -234,6 +234,140 @@ class DESeq2Unpaired(Differential):
         ro.r("print")(deseq_dataset)
         deseq_dataset = ro.r("DESeq")(deseq_dataset)
         result = ro.r("results")(deseq_dataset)
+        result = ro.r("as.data.frame")(result)
+        df = convert_dataframe_from_r(result)
+        return self.__post_call(df, df_raw_counts.index)
+
+    def __post_call(self, result: DataFrame, index: Index) -> DataFrame:
+        if isinstance(index, pd.RangeIndex):
+            result.index = result.index.astype(int)
+
+        result = result.rename(
+            columns={
+                "log2FoldChange": self.logFC_column,
+                "pvalue": self.p_column,
+                "padj": self.fdr_column,
+                "lfcSE": self.lfcSE_column,
+                "baseMean": self.baseMean_column,
+                "stat": self.stat_column,
+            }
+        )
+        result = result.loc[index]
+        return result
+
+
+class DESeq2Unpaired(Differential):
+    def __init__(
+        self,
+        condition_a,
+        condition_b,
+        condition_to_columns: Dict[str, Collection],
+        comparison_name: Optional[str] = None,
+        **parameters,
+    ):
+        super().__init__(
+            "DESeq2Unpaired",
+            condition_a,
+            condition_b,
+            condition_to_columns,
+            comparison_name,
+        )
+        self.condition_a = condition_a
+        self.condition_b = condition_b
+        self.condition_to_columns = condition_to_columns
+        if comparison_name is not None:
+            self.suffix = f" ({comparison_name})"
+        self.parameters = parameters
+        self._columns = [
+            self.logFC_column,
+            self.p_column,
+            self.fdr_column,
+            self.baseMean_column,
+            self.lfcSE_column,
+            self.stat_column,
+        ]
+        self.include_other_columns_for_variance = self.parameters.get(
+            "include_other_columns_for_variance", False
+        )
+        self.columns_a = self.condition_to_columns[self.condition_a]
+        self.columns_b = self.condition_to_columns[self.condition_b]
+
+    @property
+    def baseMean(self) -> str:
+        return self.baseMean_column
+
+    @property
+    def lfcSE(self) -> str:
+        return self.lfcSE_column
+
+    @property
+    def stat(self) -> str:
+        return self.stat_column
+
+    @property
+    def baseMean_column(self) -> str:
+        return "baseMean" + self.suffix
+
+    @property
+    def lfcSE_column(self) -> str:
+        return "lfcSE" + self.suffix
+
+    @property
+    def stat_column(self) -> str:
+        return "stat" + self.suffix
+
+    def __prepare_sample_df(self) -> DataFrame:
+        to_df = {
+            "samples": list(self.columns_a) + list(self.columns_b),
+            "condition": [f"z_{self.condition_a}"] * len(self.columns_a)
+            + [f"x_{self.condition_b}"] * len(self.columns_b),
+        }
+        if self.include_other_columns_for_variance:
+            for condition in self.condition_to_columns:
+                if condition not in [self.condition_a, self.condition_b]:
+                    to_df["samples"] += list(self.condition_to_columns[condition])
+                    to_df["condition"] += [f"o_{condition}"] * len(
+                        self.condition_to_columns[condition]
+                    )
+        df_samples = pd.DataFrame(to_df)
+        df_samples = df_samples.set_index("samples")
+        return df_samples
+
+    def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
+        """
+        Call to DESeq2 via r2py to get variance-stabilizing transformation of
+        the raw counts.
+
+        Prepare the DESeq2 input in python and call vst via
+        r2py.
+
+        Parameters
+        ----------
+        df_raw_counts : DataFrame
+            The dataframe containing the raw counts.
+
+        Returns
+        -------
+        DataFrame
+            A dataframe with VST normalized counts.
+        """
+        if not isinstance(df_raw_counts, DataFrame):
+            raise ValueError(
+                f"Transformer calls need a DataFrame as first parameter, was {type(df_raw_counts)}."
+            )
+        ro.r("library(DESeq2)")
+        df_samples = self.__prepare_sample_df()
+        formula = "~ condition"
+        r_counts = convert_dataframe_to_r(df_raw_counts)
+        r_samples = convert_dataframe_to_r(df_samples)
+        deseq_dataset = ro.r("DESeqDataSetFromMatrix")(
+            countData=r_counts, colData=r_samples, design=ro.Formula(formula)
+        )
+        deseq_dataset = ro.r("DESeq")(deseq_dataset)
+        result = ro.r("results")(
+            deseq_dataset,
+            contrast=ro.r("c")("condition", f"z_{self.condition_a}", f"x_{self.condition_b}"),
+        )
         result = ro.r("as.data.frame")(result)
         df = convert_dataframe_from_r(result)
         return self.__post_call(df, df_raw_counts.index)
