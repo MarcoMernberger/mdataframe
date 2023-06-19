@@ -142,7 +142,7 @@ class EdgeR_Unpaired(Differential):
         return self.__post_call(convert_dataframe_from_r(res[0]), input_df.index)
 
 
-class DESeq2UnpairedSimple(Differential):
+class DESeq2UnpairedAB(Differential):
     def __init__(
         self,
         columns_a: Collection,
@@ -150,7 +150,7 @@ class DESeq2UnpairedSimple(Differential):
         comparison_name: Optional[str] = None,
         **parameters,
     ):
-        super().__init__("DESeq2UnpairedSimple", columns_a, columns_b, comparison_name)
+        super().__init__("DESeq2UnpairedAB", columns_a, columns_b, comparison_name)
         if comparison_name is not None:
             self.suffix = f" ({comparison_name})"
         self.columns_a = columns_a

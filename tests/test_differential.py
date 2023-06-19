@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 import pandas as pd
-from mdataframe.differential import EdgeR_Unpaired, DESeq2Unpaired, DESeq2UnpairedSimple
+from mdataframe.differential import EdgeR_Unpaired, DESeq2Unpaired, DESeq2UnpairedAB
 from pandas import DataFrame
 
 
@@ -76,22 +76,22 @@ def test_edger_unpaired_call(test_frame):
         assert col in result.columns
 
 
-def test_DESeq2UnpairedSimple_init():
+def test_DESeq2UnpairedAB_init():
     columns_a = ["sampleA_1", "sampleA_2", "sampleA_3"]
     columns_b = ["sampleB_1", "sampleB_2", "sampleB_3"]
-    deseq = DESeq2UnpairedSimple(columns_a, columns_b)
-    assert deseq.name == "DESeq2UnpairedSimple"
-    assert deseq.suffix == " (DESeq2UnpairedSimple)"
+    deseq = DESeq2UnpairedAB(columns_a, columns_b)
+    assert deseq.name == "DESeq2UnpairedAB"
+    assert deseq.suffix == " (DESeq2UnpairedAB)"
     assert deseq.columns_a == columns_a
     assert deseq.columns_b == columns_b
-    deseq = DESeq2UnpairedSimple(columns_a, columns_b, "othername")
+    deseq = DESeq2UnpairedAB(columns_a, columns_b, "othername")
     assert deseq.suffix == " (othername)"
 
 
 def test_DESeq2Unpaired_call(test_frame):
     columns_a = ["sampleA_1", "sampleA_2", "sampleA_3"]
     columns_b = ["sampleB_1", "sampleB_2", "sampleB_3"]
-    deseq = DESeq2UnpairedSimple(columns_a, columns_b)
+    deseq = DESeq2UnpairedAB(columns_a, columns_b)
     assert callable(deseq)
     result = deseq(test_frame)
     assert isinstance(result, DataFrame)
@@ -129,7 +129,7 @@ def test_DESeq2Unpaired_call(test_frame):
 def test_deseq2_column_names():
     columns_a = ["sampleA_1", "sampleA_2", "sampleA_3"]
     columns_b = ["sampleB_1", "sampleB_2", "sampleB_3"]
-    deseq = DESeq2UnpairedSimple(columns_a, columns_b)
+    deseq = DESeq2UnpairedAB(columns_a, columns_b)
     assert deseq.logFC_column == f"log2FC ({deseq.name})"
     assert deseq.p_column == f"p ({deseq.name})"
     assert deseq.fdr_column == f"FDR ({deseq.name})"
