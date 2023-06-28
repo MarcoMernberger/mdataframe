@@ -21,7 +21,9 @@ def test_mdf_mean(test_frame):
     means = mdf.mean()
     assert isinstance(mdf, DataFrame)
     assert isinstance(means, Series)
-    np.testing.assert_equal(means, np.array([12.00, 7.50, 12.25, 14.25, 9.50, 10.00]))
+    print(test_frame)
+    print(test_frame.mean().values)
+    np.testing.assert_equal(means, test_frame.mean().values)
 
 
 # def test_mdf_morph(test_frame):

@@ -8,7 +8,6 @@ from pandas import DataFrame, Index
 from .transformations import _Transformer
 from abc import ABC
 
-
 class Differential(_Transformer, ABC):
     def __init__(self, name, *args):
         super().__init__(name, *args)
@@ -48,11 +47,12 @@ class EdgeR_Unpaired(Differential):
         self,
         columns_a: Collection,
         columns_b: Collection,
+        condition_to_columns: Dict[str, Collection],
         comparison_name: Optional[str] = None,
-        library_sizes: Optional[Iterable] = None,
-        manual_dispersion_value: float = 0.4,
         **parameters,
     ):
+        library_sizes: Optional[Iterable] = parameters.get("library_sizes", None)
+        manual_dispersion_value = parameters.get("manual_dispersion_value", 0.4)
         super().__init__(
             "EdgeR_Unpaired",
             columns_a,
@@ -66,11 +66,9 @@ class EdgeR_Unpaired(Differential):
             self.suffix = f" ({comparison_name})"
         self.columns_a = columns_a
         self.columns_b = columns_b
+        self.condition_to_columns = condition_to_columns
         self.library_sizes = library_sizes
         self.manual_dispersion_value = manual_dispersion_value
-        self.parameters = parameters
-        if len(parameters) > 0:
-            raise NotImplementedError
         self._columns = [self.logFC_column, self.p_column, self.fdr_column, self.logCPM_column]
 
     @property
@@ -147,6 +145,7 @@ class DESeq2UnpairedAB(Differential):
         self,
         columns_a: Collection,
         columns_b: Collection,
+        condition_to_columns: Dict[str, Collection],
         comparison_name: Optional[str] = None,
         **parameters,
     ):
@@ -505,5 +504,217 @@ class DESeq2Timeseries(Differential):
                 "stat": self.stat_column,
             }
         )
+        result = result.loc[index]
+        return result
+
+
+class NOIseq(Differential):
+    def __init__(
+        self,
+        condition_a,
+        condition_b,
+        condition_to_columns: Dict[str, Collection],
+        comparison_name: Optional[str] = None,
+        **parameters,
+    ):
+        super().__init__(
+            "NOIseq",
+            condition_a,
+            condition_b,
+            condition_to_columns,
+            comparison_name,
+        )
+        self.condition_a = condition_a
+        self.condition_b = condition_b
+        self.condition_to_columns = condition_to_columns
+        self.parameters = parameters
+        self.include_other_columns_for_variance = self.parameters.get(
+            "include_other_columns_for_variance", False
+        )
+        self.laplace_offset = parameters.get("laplace_offset", 0.5)
+        self.norm = self.parameters.get("norm", "tmm")
+        accepted = ["tmm", "rpkm", "uqua", "n"]
+        if self.norm not in accepted:
+            raise ValueError(
+                f"Only {accepted} are accepted as values for norm, given was {self.norm}"
+            )
+        self.df_genes = self.parameters.get(
+            "df_genes", None
+        )
+        self.biotypes = self.parameters.get(
+            "biotypes", ["protein_coding", "lincRNA"]
+        )
+        if self.df_genes is None:
+            raise ValueError(f"Noiseq needs a chromosome dataframe, none was supplied in parameters. Given was {list(parameters.keys())}.")
+        if comparison_name is not None:
+            self.suffix = f" ({comparison_name})"
+        self._columns = [
+            self.logFC_column,
+            self.prob_column,
+            self.rank_column,
+            self.D,
+        ]
+        self.columns_a = self.condition_to_columns[self.condition_a]
+        self.columns_b = self.condition_to_columns[self.condition_b]
+
+    @property
+    def logFC(self) -> str:
+        return self.logFC_column
+
+    @property
+    def prob(self) -> str:
+        return self.prob_column
+
+    @property
+    def rank(self) -> str:
+        return self.rank_column
+
+    @property
+    def D(self) -> str:
+        return self.D_column
+
+    @property
+    def D_column(self) -> str:
+        return "D" + self.suffix
+
+    @property
+    def logFC_column(self) -> str:
+        return "logFC" + self.suffix
+
+    @property
+    def prob_column(self) -> str:
+        return "prob" + self.suffix
+
+    @property
+    def rank_column(self) -> str:
+        return "rank" + self.suffix
+
+    def __prepare_sample_df(self) -> DataFrame:
+        to_df = {
+            "samples": list(self.columns_a) + list(self.columns_b),
+            "condition": [f"a_{self.condition_a}"] * len(self.columns_a)
+            + [f"base_{self.condition_b}"] * len(self.columns_b),
+        }
+        if self.include_other_columns_for_variance:
+            for condition in self.condition_to_columns:
+                if condition not in [self.condition_a, self.condition_b]:
+                    to_df["samples"] += list(self.condition_to_columns[condition])
+                    to_df["condition"] += [f"other_{condition}"] * len(
+                        self.condition_to_columns[condition]
+                    )
+        df_samples = pd.DataFrame(to_df)
+        df_samples = df_samples.set_index("samples")
+        return df_samples
+
+    def __prepare_chromosome_df(self) -> DataFrame:
+        df_chrom = self.df_genes[["gene_stable_id", "chr", "start", "stop"]]
+        df_chrom = df_chrom.set_index("gene_stable_id")
+        df_chrom = df_chrom.astype({"start": "int32", "stop": "int32"})
+        return df_chrom
+
+    def __prepare_lengths(self) -> DataFrame:
+        lengths = self.df_genes["stop"] - self.df_genes["start"]
+        return lengths
+
+    def __prepare_biotypes_df(self) -> DataFrame:
+        df_bio = self.df_genes["biotype"].values
+        return df_bio
+
+    def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
+        """
+        Call to DESeq2 via r2py to get variance-stabilizing transformation of
+        the raw counts.
+
+        Prepare the DESeq2 input in python and call vst via
+        r2py.
+
+        Parameters
+        ----------
+        df_raw_counts : DataFrame
+            The dataframe containing the raw counts.
+
+        Returns
+        -------
+        DataFrame
+            A dataframe with VST normalized counts.
+        """
+        if not isinstance(df_raw_counts, DataFrame):
+            raise ValueError(
+                f"Transformer calls need a DataFrame as first parameter, was {type(df_raw_counts)}."
+            )
+        ro.r("library('NOISeq')")
+        data = convert_dataframe_to_r(df_raw_counts)
+        df_samples = self.__prepare_sample_df()
+        factors = convert_dataframe_to_r(df_samples)
+        df_chrom = self.__prepare_chromosome_df()
+        chromosome = convert_dataframe_to_r(df_chrom)
+        biotype = ro.vectors.StrVector(self.__prepare_biotypes_df())
+        stable_ids = ro.vectors.StrVector(list(df_chrom.index.values))
+        biotype.names = stable_ids
+        length = ro.vectors.IntVector(self.__prepare_lengths())
+        length.names = stable_ids
+        conditions = ro.vectors.StrVector([f"a_{self.condition_a}", f"base_{self.condition_b}"])
+        k = self.parameters.get("k", 0.5)
+        norm = self.parameters.get("norm", "tmm")
+        factor = self.parameters.get("factor", "condition")
+        replicates = self.parameters.get("replicates", "no")
+        lc = self.parameters.get("lc", 0)
+        pnr = self.parameters.get("pnr", 0.2)
+        nss = self.parameters.get("nss", 5)
+        v = self.parameters.get("v", 0.02)
+        r = self.parameters.get("r", 100)
+        noisedata = ro.r("readData")(
+            data=data,
+            factors=factors,
+            biotype=biotype,
+            length=length,
+            chromosome=chromosome,
+        )
+        print(self.parameters)
+        print(df_chrom)
+        print(length)
+        print(biotype)
+        print(conditions)
+        if replicates == "no" or replicates == "technical" or (replicates == "biological" and df_samples.size[1] < 3):
+            noiseq = ro.r("noiseq")(
+                noisedata,
+                k=k,
+                norm=norm,
+                factor=factor,
+                replicates=replicates,
+                conditions=conditions,
+                lc=lc,
+                pnr=pnr,
+                nss=nss,
+                v=v,
+            )
+        else:
+            noiseq = ro.r("noiseqbio")(
+                noisedata,
+                k=k,
+                norm=norm,
+                factor=factor,
+                conditions=conditions,
+                lc=lc,
+                r=r,
+            )
+        print(noiseq)
+        results = ro.r("function(mynoiseq){mynoiseq@results}")(noiseq)
+        print(results)
+        df = convert_dataframe_from_r(ro.r("as.data.frame")(results))
+        return self.__post_call(df, df_raw_counts.index)
+
+    def __post_call(self, result: DataFrame, index: Index) -> DataFrame:
+        if isinstance(index, pd.RangeIndex):
+            result.index = result.index.astype(int)
+        result = result.rename(
+            columns={
+                "M": self.logFC_column,
+                "D": self.D_column,
+                "prob": self.prob_column,
+                "ranking": self.rank_column,
+            }
+        )
+        result = result[[self.logFC_column, self.D_column, self.prob_column, self.rank_column]]
         result = result.loc[index]
         return result
