@@ -45,8 +45,8 @@ class Differential(_Transformer, ABC):
 class EdgeR_Unpaired(Differential):
     def __init__(
         self,
-        columns_a: Collection,
-        columns_b: Collection,
+        condition_a: str,
+        condition_b: str,
         condition_to_columns: Dict[str, Collection],
         comparison_name: Optional[str] = None,
         **parameters,
@@ -55,17 +55,21 @@ class EdgeR_Unpaired(Differential):
         manual_dispersion_value = parameters.get("manual_dispersion_value", 0.4)
         super().__init__(
             "EdgeR_Unpaired",
-            columns_a,
-            columns_b,
+            condition_a,
+            condition_b,
+            condition_to_columns,
             comparison_name,
             library_sizes,
             manual_dispersion_value,
         )
+        self.condition_a = condition_a
+        self.condition_b = condition_b
+        self.condition_to_columns = condition_to_columns
+        self.columns_a = self.condition_to_columns[condition_a]
+        self.columns_b = self.condition_to_columns[condition_b]
         self.suffix = f" ({self.name})"
         if comparison_name is not None:
             self.suffix = f" ({comparison_name})"
-        self.columns_a = columns_a
-        self.columns_b = columns_b
         self.condition_to_columns = condition_to_columns
         self.library_sizes = library_sizes
         self.manual_dispersion_value = manual_dispersion_value
@@ -143,17 +147,20 @@ class EdgeR_Unpaired(Differential):
 class DESeq2UnpairedAB(Differential):
     def __init__(
         self,
-        columns_a: Collection,
-        columns_b: Collection,
+        condition_a: str,
+        condition_b: str,
         condition_to_columns: Dict[str, Collection],
         comparison_name: Optional[str] = None,
         **parameters,
     ):
-        super().__init__("DESeq2UnpairedAB", columns_a, columns_b, comparison_name)
+        super().__init__("DESeq2UnpairedAB", condition_a, condition_b, condition_to_columns, comparison_name)
+        self.condition_a = condition_a
+        self.condition_b = condition_b
         if comparison_name is not None:
             self.suffix = f" ({comparison_name})"
-        self.columns_a = columns_a
-        self.columns_b = columns_b
+        self.condition_to_columns = condition_to_columns
+        self.columns_a = self.condition_to_columns[condition_a]
+        self.columns_b = self.condition_to_columns[condition_b]
         self.parameters = parameters
         if len(parameters) > 0:
             raise NotImplementedError
@@ -258,8 +265,8 @@ class DESeq2UnpairedAB(Differential):
 class DESeq2Unpaired(Differential):
     def __init__(
         self,
-        condition_a,
-        condition_b,
+        condition_a: str,
+        condition_b: str,
         condition_to_columns: Dict[str, Collection],
         comparison_name: Optional[str] = None,
         **parameters,
@@ -508,7 +515,7 @@ class DESeq2Timeseries(Differential):
         return result
 
 
-class NOIseq(Differential):
+class NOISeq(Differential):
     def __init__(
         self,
         condition_a,
@@ -518,7 +525,7 @@ class NOIseq(Differential):
         **parameters,
     ):
         super().__init__(
-            "NOIseq",
+            "NOISeq",
             condition_a,
             condition_b,
             condition_to_columns,
@@ -544,8 +551,8 @@ class NOIseq(Differential):
         self.biotypes = self.parameters.get(
             "biotypes", ["protein_coding", "lincRNA"]
         )
-        if self.df_genes is None:
-            raise ValueError(f"Noiseq needs a chromosome dataframe, none was supplied in parameters. Given was {list(parameters.keys())}.")
+        #if self.df_genes is None:
+        #    raise ValueError(f"Noiseq needs a chromosome dataframe, none was supplied in parameters. Given was {list(parameters.keys())}.")
         if comparison_name is not None:
             self.suffix = f" ({comparison_name})"
         self._columns = [
@@ -606,18 +613,26 @@ class NOIseq(Differential):
         df_samples = df_samples.set_index("samples")
         return df_samples
 
-    def __prepare_chromosome_df(self) -> DataFrame:
-        df_chrom = self.df_genes[["gene_stable_id", "chr", "start", "stop"]]
-        df_chrom = df_chrom.set_index("gene_stable_id")
-        df_chrom = df_chrom.astype({"start": "int32", "stop": "int32"})
+    def __prepare_chromosome_df(self, df_genes) -> DataFrame:
+        df_chrom = None
+        required = ["chr", "start", "stop"]
+        if df_genes.columns.contains(required).all():
+            df_chrom = df_genes.copy()
+            df_chrom = df_genes[required]
+            df_chrom = df_chrom.astype({"start": "int32", "stop": "int32"})
         return df_chrom
 
-    def __prepare_lengths(self) -> DataFrame:
-        lengths = self.df_genes["stop"] - self.df_genes["start"]
+    def __prepare_lengths(self, df_genes) -> DataFrame:
+        required = ["start", "stop"]
+        lengths = None
+        if df_genes.columns.contains(required).all():
+            lengths = self.df_genes["stop"] - self.df_genes["start"]
         return lengths
 
-    def __prepare_biotypes_df(self) -> DataFrame:
-        df_bio = self.df_genes["biotype"].values
+    def __prepare_biotypes_df(self, df_genes) -> DataFrame:
+        df_bio = None
+        if df_genes.columns.contains("biotype"):
+            df_bio = self.df_genes["biotype"].values
         return df_bio
 
     def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
@@ -643,16 +658,12 @@ class NOIseq(Differential):
                 f"Transformer calls need a DataFrame as first parameter, was {type(df_raw_counts)}."
             )
         ro.r("library('NOISeq')")
+        #if "gene_stable_id" in df_raw_counts.columns:  # this is probably not needed
+        #    df_raw_counts = df_raw_counts.set_index("gene_stable_id")
         data = convert_dataframe_to_r(df_raw_counts)
         df_samples = self.__prepare_sample_df()
         factors = convert_dataframe_to_r(df_samples)
-        df_chrom = self.__prepare_chromosome_df()
-        chromosome = convert_dataframe_to_r(df_chrom)
-        biotype = ro.vectors.StrVector(self.__prepare_biotypes_df())
-        stable_ids = ro.vectors.StrVector(list(df_chrom.index.values))
-        biotype.names = stable_ids
-        length = ro.vectors.IntVector(self.__prepare_lengths())
-        length.names = stable_ids
+        stable_ids = ro.vectors.StrVector(list(df_raw_counts.index.values))
         conditions = ro.vectors.StrVector([f"a_{self.condition_a}", f"base_{self.condition_b}"])
         k = self.parameters.get("k", 0.5)
         norm = self.parameters.get("norm", "tmm")
@@ -663,18 +674,25 @@ class NOIseq(Differential):
         nss = self.parameters.get("nss", 5)
         v = self.parameters.get("v", 0.02)
         r = self.parameters.get("r", 100)
+        optional_arguments = {}
+        df_chrom = self.__prepare_chromosome_df(df_raw_counts)
+        if df_chrom is not None:
+            chromosome = convert_dataframe_to_r(df_chrom)
+            optional_arguments["chromosome"] = chromosome
+        biotype = ro.vectors.StrVector(self.__prepare_biotypes_df(df_raw_counts))
+        if biotype is not None:
+            biotype.names = stable_ids
+            optional_arguments["biotype"] = biotype
+        lengths = self.__prepare_lengths(df_raw_counts)
+        if lengths is not None:
+            length = ro.vectors.IntVector(lengths)
+            length.names = stable_ids
+            optional_arguments["length"] = length
         noisedata = ro.r("readData")(
             data=data,
             factors=factors,
-            biotype=biotype,
-            length=length,
-            chromosome=chromosome,
+            **optional_arguments
         )
-        print(self.parameters)
-        print(df_chrom)
-        print(length)
-        print(biotype)
-        print(conditions)
         if replicates == "no" or replicates == "technical" or (replicates == "biological" and df_samples.size[1] < 3):
             noiseq = ro.r("noiseq")(
                 noisedata,
@@ -698,9 +716,7 @@ class NOIseq(Differential):
                 lc=lc,
                 r=r,
             )
-        print(noiseq)
         results = ro.r("function(mynoiseq){mynoiseq@results}")(noiseq)
-        print(results)
         df = convert_dataframe_from_r(ro.r("as.data.frame")(results))
         return self.__post_call(df, df_raw_counts.index)
 
