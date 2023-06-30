@@ -8,6 +8,7 @@ from pandas import DataFrame, Index
 from .transformations import _Transformer
 from abc import ABC
 
+
 class Differential(_Transformer, ABC):
     def __init__(self, name, *args):
         super().__init__(name, *args)
@@ -153,7 +154,9 @@ class DESeq2UnpairedAB(Differential):
         comparison_name: Optional[str] = None,
         **parameters,
     ):
-        super().__init__("DESeq2UnpairedAB", condition_a, condition_b, condition_to_columns, comparison_name)
+        super().__init__(
+            "DESeq2UnpairedAB", condition_a, condition_b, condition_to_columns, comparison_name
+        )
         self.condition_a = condition_a
         self.condition_b = condition_b
         if comparison_name is not None:
@@ -545,13 +548,8 @@ class NOISeq(Differential):
             raise ValueError(
                 f"Only {accepted} are accepted as values for norm, given was {self.norm}"
             )
-        self.df_genes = self.parameters.get(
-            "df_genes", None
-        )
-        self.biotypes = self.parameters.get(
-            "biotypes", ["protein_coding", "lincRNA"]
-        )
-        #if self.df_genes is None:
+        self.biotypes = self.parameters.get("biotypes", ["protein_coding", "lincRNA"])
+        # if self.df_genes is None:
         #    raise ValueError(f"Noiseq needs a chromosome dataframe, none was supplied in parameters. Given was {list(parameters.keys())}.")
         if comparison_name is not None:
             self.suffix = f" ({comparison_name})"
@@ -590,11 +588,11 @@ class NOISeq(Differential):
 
     @property
     def prob_column(self) -> str:
-        return "prob" + self.suffix
+        return "Prob" + self.suffix
 
     @property
     def rank_column(self) -> str:
-        return "rank" + self.suffix
+        return "Rank" + self.suffix
 
     def __prepare_sample_df(self) -> DataFrame:
         to_df = {
@@ -615,24 +613,24 @@ class NOISeq(Differential):
 
     def __prepare_chromosome_df(self, df_genes) -> DataFrame:
         df_chrom = None
-        required = ["chr", "start", "stop"]
-        if df_genes.columns.contains(required).all():
+        required = set(["chr", "start", "stop"])
+        if len(required.difference(df_genes.columns)) == 0:
             df_chrom = df_genes.copy()
             df_chrom = df_genes[required]
             df_chrom = df_chrom.astype({"start": "int32", "stop": "int32"})
         return df_chrom
 
     def __prepare_lengths(self, df_genes) -> DataFrame:
-        required = ["start", "stop"]
+        required = set(["start", "stop"])
         lengths = None
-        if df_genes.columns.contains(required).all():
-            lengths = self.df_genes["stop"] - self.df_genes["start"]
+        if len(required.difference(df_genes.columns)) == 0:
+            lengths = df_genes["stop"] - df_genes["start"]
         return lengths
 
     def __prepare_biotypes_df(self, df_genes) -> DataFrame:
         df_bio = None
-        if df_genes.columns.contains("biotype"):
-            df_bio = self.df_genes["biotype"].values
+        if "biotype" in df_genes.columns:
+            df_bio = df_genes["biotype"].values
         return df_bio
 
     def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
@@ -658,9 +656,9 @@ class NOISeq(Differential):
                 f"Transformer calls need a DataFrame as first parameter, was {type(df_raw_counts)}."
             )
         ro.r("library('NOISeq')")
-        #if "gene_stable_id" in df_raw_counts.columns:  # this is probably not needed
+        # if "gene_stable_id" in df_raw_counts.columns:  # this is probably not needed
         #    df_raw_counts = df_raw_counts.set_index("gene_stable_id")
-        data = convert_dataframe_to_r(df_raw_counts)
+        data = convert_dataframe_to_r(df_raw_counts[self.columns_a + self.columns_b])
         df_samples = self.__prepare_sample_df()
         factors = convert_dataframe_to_r(df_samples)
         stable_ids = ro.vectors.StrVector(list(df_raw_counts.index.values))
@@ -679,21 +677,22 @@ class NOISeq(Differential):
         if df_chrom is not None:
             chromosome = convert_dataframe_to_r(df_chrom)
             optional_arguments["chromosome"] = chromosome
-        biotype = ro.vectors.StrVector(self.__prepare_biotypes_df(df_raw_counts))
+        biotype = self.__prepare_biotypes_df(df_raw_counts)
         if biotype is not None:
             biotype.names = stable_ids
+            biotype = ro.vectors.StrVector(biotype)
             optional_arguments["biotype"] = biotype
         lengths = self.__prepare_lengths(df_raw_counts)
         if lengths is not None:
             length = ro.vectors.IntVector(lengths)
             length.names = stable_ids
             optional_arguments["length"] = length
-        noisedata = ro.r("readData")(
-            data=data,
-            factors=factors,
-            **optional_arguments
-        )
-        if replicates == "no" or replicates == "technical" or (replicates == "biological" and df_samples.size[1] < 3):
+        noisedata = ro.r("readData")(data=data, factors=factors, **optional_arguments)
+        if (
+            replicates == "no"
+            or replicates == "technical"
+            or (replicates == "biological" and df_samples.size[1] < 3)
+        ):
             noiseq = ro.r("noiseq")(
                 noisedata,
                 k=k,
