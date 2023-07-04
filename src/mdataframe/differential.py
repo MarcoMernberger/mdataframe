@@ -15,6 +15,15 @@ class Differential(_Transformer, ABC):
         self.suffix = f" ({self.name})"
 
     @property
+    def columns(self) -> List[str]:
+        return self._columns
+
+
+class DifferentialStatistics(Differential, ABC):
+    def __init__(self, name, *args):
+        super().__init__(name, *args)
+
+    @property
     def logFC(self) -> str:
         return self.logFC_column
 
@@ -38,12 +47,8 @@ class Differential(_Transformer, ABC):
     def fdr_column(self) -> str:
         return "FDR" + self.suffix
 
-    @property
-    def columns(self) -> List[str]:
-        return self._columns
 
-
-class EdgeR_Unpaired(Differential):
+class EdgeR_Unpaired(DifferentialStatistics):
     def __init__(
         self,
         condition_a: str,
@@ -145,7 +150,7 @@ class EdgeR_Unpaired(Differential):
         return self.__post_call(convert_dataframe_from_r(res[0]), input_df.index)
 
 
-class DESeq2UnpairedAB(Differential):
+class DESeq2UnpairedAB(DifferentialStatistics):
     def __init__(
         self,
         condition_a: str,
@@ -265,7 +270,7 @@ class DESeq2UnpairedAB(Differential):
         return result
 
 
-class DESeq2Unpaired(Differential):
+class DESeq2Unpaired(DifferentialStatistics):
     def __init__(
         self,
         condition_a: str,
@@ -399,7 +404,7 @@ class DESeq2Unpaired(Differential):
         return result
 
 
-class DESeq2Timeseries(Differential):
+class DESeq2Timeseries(DifferentialStatistics):
     def __init__(
         self,
         sample_columns: Collection,
