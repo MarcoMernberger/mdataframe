@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 import pandas as pd
-from mdataframe.filter import Filter
+from mdataframe.filter import Filter, CombinedFilter
 from pandas import DataFrame
 
 
@@ -118,4 +118,27 @@ def test_filter_isin(test_frame2):
 
 def test_filter_operator_unknown(test_frame2):
     with pytest.raises(ValueError):
-        myfilter = Filter([("type", "xxx", ["A"])])
+        Filter([("type", "xxx", ["A"])])
+
+
+def test_filter_gt_or_lt_cobined(test_frame2):
+    myfilter = Filter([("log", ">", 1)])
+    myfilter |= Filter([("log", "<", -1)])
+    df = myfilter(test_frame2)
+    pd.testing.assert_index_equal(df.index, pd.Index(["A", "C"]))
+
+
+def test_filter_combined_fail(test_frame2):
+    with pytest.raises(ValueError):
+        myfilter = CombinedFilter(
+            Filter([("log", ">", 1)]),
+            Filter([("log", "<", -1)]),
+            "not a pandas operation"
+        )
+        myfilter(test_frame2)
+
+
+def test_filter_gt_and_lt_comined(test_frame2):
+    myfilter = Filter([("log", ">", 0)]) & Filter([("fdr", "<", 0.1)])
+    df = myfilter(test_frame2)
+    pd.testing.assert_index_equal(df.index, pd.Index(["B"]))

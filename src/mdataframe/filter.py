@@ -131,13 +131,35 @@ class Filter(_Transformer):
 
         return __filter
 
-    def __call__(self, df: DataFrame) -> DataFrame:
+    def __call__(self, df: DataFrame, *args, **kwargs) -> DataFrame:
         """Call edgeR exactTest comparing two groups unpaired."""
         to_keep = df.index
-        print(df.columns)
         for myfilter in self.__filters:
             to_keep = to_keep.intersection(myfilter(df))
         return df.loc[to_keep]
+
+    def __and__(self, other_filter):
+        return CombinedFilter(self, other_filter, "intersection")
+
+    def __or__(self, other_filter):
+        return CombinedFilter(self, other_filter, "union")
+
+
+class CombinedFilter(Filter):
+
+    def __init__(self, filter1: Filter, filter2: Filter, combine_operation: str = "union"):
+        self.filter1 = filter1
+        self.filter2 = filter2
+        self.combine_operation = combine_operation
+
+    def __call__(self, df: DataFrame, *args, **kwargs) -> DataFrame:
+        index1 = self.filter1(df).index
+        index2 = self.filter2(df).index
+        if not hasattr(index1, self.combine_operation):
+            raise ValueError(f"Combine operation {self.combine_operation} not supported for pandas.Index class.")
+        combine = getattr(index1, self.combine_operation)
+        index_combined = combine(index2)
+        return df.loc[index_combined]
 
 
 """
