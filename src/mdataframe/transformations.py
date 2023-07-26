@@ -20,7 +20,7 @@ class _Transformer(ABC):
         self.name = name
         self.__set_params(args, kwargs)
         self.__calculate_hash()
-        self.suffix = False
+        self.suffix: Optional[str] = None
 
     def __set_params(self, args_from_init, kwargs_from_init):
         self._parameter_as_string = ",".join([str(x) for x in args_from_init])
@@ -51,7 +51,7 @@ class _Transformer(ABC):
 
     def _post_call(self, df: DataFrame, index: Index) -> DataFrame:
         df = df.reset_index(drop=True)
-        if self.suffix:
+        if self.suffix is not None:
             df.columns = [f"{col}{self.suffix}" for col in df.columns]
         df.index = index
         return df
@@ -65,7 +65,7 @@ class TMM(_Transformer):
         self,
         samples_to_group: Optional[Dict[str, str]] = None,
         batch_effects: Optional[Dict[str, str]] = None,
-        suffix: Union[bool, str] = False,
+        suffix: Optional[str] = None,
     ):
         super().__init__("TMM", samples_to_group, batch_effects)
         self.samples_to_group = samples_to_group
@@ -74,7 +74,7 @@ class TMM(_Transformer):
         if suffix is True:
             self.suffix = " (TMM)" if self.batch_effects is None else " (TMM batch-corrected)"
 
-    def __call__(self, df_raw_counts: DataFrame) -> DataFrame:
+    def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
         """
         Call to edgeR via r2py to get TMM (trimmed mean of M-values)
         normalization for raw counts.
@@ -109,7 +109,7 @@ class TMM(_Transformer):
             to_df["batch"] = [
                 self.batch_effects[sample_name] for sample_name in df_raw_counts.columns
             ]
-        columns_for_r = {col: "X" + col for col in df_raw_counts.columns}
+        columns_for_r = {col: "X" + col.replace("-", ".") for col in df_raw_counts.columns}
         df_raw_counts = df_raw_counts.rename(columns=columns_for_r)
         df_samples = pd.DataFrame(to_df)
         df_samples["lib.size"] = df_samples["lib.size"].astype(int)
@@ -152,16 +152,16 @@ class VST(_Transformer):
         self,
         samples_to_group: Optional[Dict[str, str]] = None,
         nsub: int = 1000,
-        suffix: Union[bool, str] = False,
+        suffix: Optional[str] = None,
     ):
         super().__init__("VST", samples_to_group, nsub)
         self.samples_to_group = samples_to_group
         self.nsub = nsub
         self.suffix = suffix
-        if self.suffix is True:
+        if self.suffix is None:
             self.suffix = " (VST)"
 
-    def __call__(self, df_raw_counts: DataFrame) -> DataFrame:
+    def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
         """
         Call to DESeq2 via r2py to get variance-stabilizing transformation of
         the raw counts.
