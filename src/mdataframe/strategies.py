@@ -4,6 +4,7 @@ Created on Mar 23, 2016
 This module is used for multi-dimensional scaling.
 @author: mernberger
 """
+
 import matplotlib
 
 # from matplotlib.mlab import PCA as mlabPCA
@@ -216,7 +217,7 @@ class DBSCAN(ClusteringMethod):
         name,
         scaler=None,
         imputer=None,
-        missing_value=np.NaN,
+        missing_value=np.nan,
         cluster_columns=False,
         eps=0.5,
         min_samples=5,
@@ -447,7 +448,9 @@ class SKlearnAgglomerative(ClusteringMethod):
 
 
 class ScipyAgglomerative(ClusteringMethod):
-    def __init__(self, name, no_of_clusters=2, threshold=2, affinity="euclidean", linkage="ward"):
+    def __init__(
+        self, name, no_of_clusters=2, threshold=2, affinity="euclidean", linkage="ward"
+    ):
         """
         This is a wrapper for hierarchical clustering from scipy. Use this if you want dendrograms.
         """
@@ -844,7 +847,7 @@ class PCA(ML_Base):
 class MyPCA(PCA):    
     def __init__(self, name, genes_or_df_or_loading_function, columns, k = 3, class_label_dict = None, 
                  axis = 1, dependencies = [], annotators = [], row_id_column = 'stable_id', 
-                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.NaN):
+                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.nan):
         """
         This is a wrapper class for a principle component analysis, that takes a dataframe or a
         genomic region alternatively to calculate a PCA.
@@ -910,7 +913,7 @@ class SklearnPCA(PCA):
     
     def __init__(self, name, genes_or_df_or_loading_function, columns, k = 3, class_label_dict_or_function = None, 
                  axis = 1, dependencies = [], annotators = [], whiten = True, 
-                 row_id_column = 'stable_id', label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.NaN):
+                 row_id_column = 'stable_id', label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.nan):
         """
         This is PCA wrapper using the sklearn package, that takes a dataframe or a
         genomic region alternatively to calculate a PCA.
@@ -945,7 +948,7 @@ class LDA(PCA):
     
     def __init__(self, name, genes_or_df_or_loading_function, columns, training_data, class_label_dict = None, 
                  axis = 1, dependencies = [], annotators = [], row_id_column = 'stable_id', 
-                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.NaN):
+                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.nan):
         """
         This is LDA wrapper using the sklearn package, that takes a dataframe or a
         genomic region alternatively to calculate a PCA for dimensionality reduction. 
@@ -979,7 +982,7 @@ class TSNE(PCA):
                  
     def __init__(self, name, genes_or_df_or_loading_function, columns, k = 3, class_label_dict_or_function = None, 
                  axis = 1, dependencies = [], annotators = [], row_id_column = 'stable_id', 
-                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.NaN, preplexity = 30,
+                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.nan, preplexity = 30,
                  learning_rate = 1000.0, iterations = 1000, metric = 'euclidean', init = 'random',
                  random = None, method = 'barnes_hut'):
         """
@@ -1028,7 +1031,7 @@ class MDS(PCA):
     
     def __init__(self, name, genes_or_df_or_loading_function, columns, k = 3, class_label_dict = None, 
                  axis = 1, dependencies = [], annotators = [], row_id_column = 'stable_id', 
-                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.NaN, n_init = 4, 
+                 label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.nan, n_init = 4, 
                  max_iterations = 300, n_jobs = 1, random = None, dissimilarity = 'euclidean'):
         """
         This is a wrapper for MDS.
@@ -1069,7 +1072,7 @@ class MlabPCA(PCA):
     
     def __init__(self, name, df_or_gene, columns, k = 3, class_label_dict = None,
                  instance_columns = True, dependencies = [], annotators = [], 
-                 row_id_column = 'stable_id', label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.NaN):
+                 row_id_column = 'stable_id', label_mangler = lambda x : x, scaler = None, imputer = None, missing_value = np.nan):
         """
         This is PCA wrapper using the matplotlib.mlab package, that takes a dataframe or a
         genomic region alternatively to calculate a PCA.

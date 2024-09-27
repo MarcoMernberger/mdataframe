@@ -72,7 +72,9 @@ class TMM(_Transformer):
         self.batch_effects = batch_effects
         self.suffix = suffix
         if suffix is True:
-            self.suffix = " (TMM)" if self.batch_effects is None else " (TMM batch-corrected)"
+            self.suffix = (
+                " (TMM)" if self.batch_effects is None else " (TMM batch-corrected)"
+            )
 
     def __call__(self, df_raw_counts: DataFrame, *args, **kwargs) -> DataFrame:
         """
@@ -103,13 +105,16 @@ class TMM(_Transformer):
         to_df = {"lib.size": df_raw_counts.sum(axis=0).values}
         if self.samples_to_group is not None:
             to_df["group"] = [
-                self.samples_to_group[sample_name] for sample_name in self.samples_to_group
+                self.samples_to_group[sample_name]
+                for sample_name in self.samples_to_group
             ]
         if self.batch_effects is not None:
             to_df["batch"] = [
                 self.batch_effects[sample_name] for sample_name in df_raw_counts.columns
             ]
-        columns_for_r = {col: "X" + col.replace("-", ".") for col in df_raw_counts.columns}
+        columns_for_r = {
+            col: "X" + col.replace("-", ".") for col in df_raw_counts.columns
+        }
         df_raw_counts = df_raw_counts.rename(columns=columns_for_r)
         df_samples = pd.DataFrame(to_df)
         df_samples["lib.size"] = df_samples["lib.size"].astype(int)
@@ -188,7 +193,8 @@ class VST(_Transformer):
         to_df = {}
         if self.samples_to_group is not None:
             to_df["condition"] = [
-                self.samples_to_group[sample_name] for sample_name in self.samples_to_group
+                self.samples_to_group[sample_name]
+                for sample_name in self.samples_to_group
             ]
         formula = "~ condition"
         df_samples = pd.DataFrame(to_df)

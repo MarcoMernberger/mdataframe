@@ -9,7 +9,7 @@ import pandas as pd
 import pypipegraph as ppg
 import sklearn
 
-from umap.umap_ import UMAP as UMAPu
+#from umap.umap_ import UMAP as UMAPu
 from pandas import DataFrame, Index
 from .transformations import _Transformer
 from sklearn.decomposition import PCA as PCAsk
@@ -69,8 +69,16 @@ class PCA(_Reducer):
 
 
 class TSNE(_Reducer):
-    def __init__(self, name: str = "TSNE", n_components: int = 2, perplexity: float = 30, **kwargs):
-        super().__init__(name, n_components=n_components, perplexity=perplexity, **kwargs)
+    def __init__(
+        self,
+        name: str = "TSNE",
+        n_components: int = 2,
+        perplexity: float = 30,
+        **kwargs,
+    ):
+        super().__init__(
+            name, n_components=n_components, perplexity=perplexity, **kwargs
+        )
         self.perplexity = perplexity
 
     def _set_model(self):

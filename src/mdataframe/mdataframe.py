@@ -88,7 +88,7 @@ class Transformer:
 
 
 class ImputeFixed(Transformer):
-    def __init__(self, missing_value=np.NaN, replacement_value=0):
+    def __init__(self, missing_value=np.nan, replacement_value=0):
         """
         replaces missing values with  with zeros
         """
@@ -104,7 +104,7 @@ class ImputeFixed(Transformer):
 
 
 class ImputeMeanMedian(Transformer):
-    def __init__(self, missing_value=np.NaN, axis=0, strategy="mean"):
+    def __init__(self, missing_value=np.nan, axis=0, strategy="mean"):
         name = f"Im({missing_value}{axis}{strategy})"
         if not strategy in ["mean", "median", "most_frequent"]:
             raise ValueError(
@@ -753,7 +753,7 @@ class MDF(object):
     def impute(self, *transformations, axis=1):
 
         if len(transformations) == 0:
-            return self.transform(ImputeFixed(missing_value=np.NaN, replacement_value=0))
+            return self.transform(ImputeFixed(missing_value=np.nan, replacement_value=0))
 
         return self.transform(*transformations, axis=1)
 

@@ -43,7 +43,7 @@ class FromFile(Annotator):
         index_column_genes : str, optional
             Index column in ddf to append to, by default "gene_stable_id".
         fill_value : float, optonal
-            Value to fill for missing rows, defaults to np.NaN.
+            Value to fill for missing rows, defaults to np.nan.
         is_tsv : bool
             If the input file is a .tsv file regardless of the suffix.
         """
@@ -51,7 +51,7 @@ class FromFile(Annotator):
         self.columns = columns_to_add
         self.index_column_table = index_column_table
         self.index_column_genes = index_column_genes
-        self.fill = fill_value if fill_value is not None else np.NaN
+        self.fill = fill_value if fill_value is not None else np.nan
         self.is_tsv = is_tsv
 
     def parse(self):

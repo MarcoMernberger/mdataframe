@@ -119,7 +119,9 @@ def compare_function(f1, f2, expected):
     eq_conames = f1.__code__.co_names == f2.__code__.co_names
     eq_varnames = f1.__code__.co_varnames == f2.__code__.co_varnames
     print(eq_bytecode, eq_closure, eq_constants, eq_conames)  # , eq_varnames)
-    assert (eq_bytecode & eq_closure & eq_conames & eq_constants) == expected  # & eq_varnames
+    assert (
+        eq_bytecode & eq_closure & eq_conames & eq_constants
+    ) == expected  # & eq_varnames
 
 
 compare_function(func1, func2, True)  # should be true
